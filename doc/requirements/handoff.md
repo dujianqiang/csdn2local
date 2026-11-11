@@ -10,7 +10,6 @@
 
 - 第一阶段核心功能已实现并推送到 GitHub。
 - 当前分支：`dev`，本地比 `origin/dev` 多 2 个提交，待推送。
-- 最新提交：`1e6db70 docs: update project handoff`。
 - 代码折叠功能和本交接文档均已提交，尚未推送本轮提交。
 - OpenSpec 规划和实现任务均已完成，相关变更尚未归档。
 
