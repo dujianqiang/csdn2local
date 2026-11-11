@@ -1,4 +1,4 @@
-# 项目文档
+# csdn 单个连接下载项目文档
 
 本目录用于存放项目需求文档、设计资料、调研记录及其他相关文档。
 
@@ -7,6 +7,7 @@
 - [需求概述](./requirements/project-overview.md)
 - [项目需求交接记录](./requirements/handoff.md)
 - [本地开发说明](./development.md)
+- [OpenSpec 主规格和历史归档](../openspec/README.md)
 
 ## 建议分类
 

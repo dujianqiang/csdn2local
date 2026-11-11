@@ -29,7 +29,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="csdn2local", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="csdn 单个连接下载", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health")

@@ -1,13 +1,11 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Project name: csdn 单个连接下载
+  Product scope: download one public CSDN article URL to local HTML and/or PDF files.
+  The repository is open source and keeps one canonical first-phase requirement.
+  Project documents are maintained in Chinese; implementation identifiers may remain English.
+  Follow AGENTS.md and complete the OpenSpec workflow before implementation.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
