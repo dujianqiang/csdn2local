@@ -193,8 +193,9 @@ def render_article_document(title: str, body_html: str) -> str:
   <style>
     body {{ max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; color: #222; }}
     img, video {{ max-width: 100%; height: auto; }}
-    pre {{ overflow-x: auto; padding: 1rem; background: #f6f8fa; }}
-    code {{ font-family: Consolas, monospace; }}
+    pre {{ overflow-x: auto; margin: 1.25rem 0; padding: 1rem 1.25rem; background: #282c34; color: #abb2bf; border: 1px solid #3b4048; border-radius: 8px; line-height: 1.6; white-space: pre; tab-size: 4; font-family: Consolas, "Cascadia Code", "Courier New", monospace; }}
+    pre code {{ display: block; padding: 0; background: transparent; color: inherit; white-space: pre; font-family: inherit; }}
+    pre .token.comment {{ color: #7f848e; }}
   </style>
 </head>
 <body>
