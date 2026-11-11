@@ -1,10 +1,18 @@
 # 项目需求交接记录
 
-更新时间：2026-11-10
+更新时间：2026-11-11
 
 ## 项目目标
 
 将 CSDN 文章保存为本地文件，降低网站停止运营或内容下线导致文章无法访问的风险，并为后续上传到其他存储或平台提供基础。
+
+## 当前状态
+
+- 第一阶段核心功能已实现并推送到 GitHub。
+- 当前分支：`dev`，已与 `origin/dev` 同步。
+- 最新提交：`4b0a5b8 feat: make archived code blocks collapsible`。
+- 当前代码变更已提交；交接文档本次更新后再提交。
+- OpenSpec 规划和实现任务均已完成，相关变更尚未归档。
 
 ## 已确认的第一阶段需求
 
@@ -32,18 +40,55 @@
 - 首期不做正文全文搜索。
 - 第一阶段只保存本地文件，不接入外部上传平台。
 
+## 已实现功能
+
+- Python FastAPI 单体 Web 服务。
+- 单个 CSDN 公开文章 URL 同步下载。
+- 默认保存 HTML，可选 PDF 或 HTML+PDF。
+- 正文提取和非正文区域清理。
+- 保留代码块、代码注释、换行、缩进和 ASCII/Unicode 边框字符。
+- 离线 HTML 使用深色代码块样式、等宽字体和横向滚动。
+- 每个代码块默认展开，并支持点击标题折叠/展开；打印/PDF 时保持代码可见。
+- 图片等正文资源保存到 `assets/`，HTML 使用相对路径。
+- 文章元数据写入 `metadata.json`，搜索索引使用 SQLite。
+- 重复 URL 覆盖旧归档，只保留最新版本。
+- 支持部分成功、失败原因提示和重新下载。
+- 公开 CSDN 页面使用兼容性更好的标准库 HTTPS 抓取方式。
+- 搜索页面按标题、域名、URL、作者和标签模糊匹配，并优先打开本地 HTML，缺少 HTML 时回退到 PDF。
+
+用户提供的文章已经保存到：
+
+```text
+data/blog.csdn.net/<article-id>_<sanitized-title>/article.html
+```
+
+`data/`、`.venv/`、Playwright 浏览器运行时等本地运行文件已加入 `.gitignore`。
+
 ## 相关文档
 
 - 需求概述：[project-overview.md](./project-overview.md)
+- 本地开发说明：[../development.md](../development.md)
 - 项目协作规范：[../../AGENTS.md](../../AGENTS.md)
+- 当前 OpenSpec 变更：[../../openspec/changes/](../../openspec/changes/)
 
-## 待明确事项
+## 后续迭代建议
 
-- 文章 ID 无法提取时的备用目录命名方案。
-- Web 页面具体布局和下载结果状态展示方式。
-- 版权合规要求和使用边界。
-- HTML 与 PDF 的具体生成技术方案。
+- 将正文资源下载也切换到兼容 HTTPS 传输，降低图片资源出现 TLS 错误的概率。
+- 增加更多 CSDN 页面结构样本，持续完善正文识别和非正文清理规则。
+- 优化 HTML/PDF 的代码语法高亮和行号显示。
+- 明确版权提示、文章使用边界和本地工具的免责声明。
+- 后续再考虑批量导入、正文全文搜索和外部存储上传。
 
 ## 下一步
 
-需求确认后，创建 OpenSpec 变更提案，补充 proposal、design、spec 和 tasks，再进入实现阶段。
+后续任何功能或问题修复都要先按 OpenSpec 创建或更新变更工件，再进入实现、测试、提交和推送流程。
+
+本地启动命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+浏览器访问：`http://127.0.0.1:8000`
+
+最近一次完整验证：16 个测试通过，OpenSpec 严格校验通过。
