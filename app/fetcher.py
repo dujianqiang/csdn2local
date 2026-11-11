@@ -55,6 +55,6 @@ class PageFetcher:
             raise FetchError("文章需要登录，第一阶段不支持登录文章")
         html = response.text
         lowered = html.lower()
-        if any(marker in lowered for marker in ("登录后查看", "请登录后阅读", "付费专栏")):
+        if any(marker in lowered for marker in ("登录后查看", "请登录后阅读")):
             raise FetchError("文章需要登录或付费，第一阶段不支持此类文章")
         return PageSnapshot(requested_url=requested_url, final_url=str(response.url), html=html)
