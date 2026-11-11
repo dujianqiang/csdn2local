@@ -14,9 +14,10 @@ ARTICLE_HTML = """
     <main id="content_views">
       <h1>正文标题</h1>
       <p>这是正文内容，用于测试文章提取。</p>
-      <pre><code>print('hello')</code></pre>
+      <pre><code><span class="token comment">// keep this code comment</span>
+print('hello')</code></pre>
       <img src="/images/a.png" onerror="alert(1)">
-      <div class="comment">不应该被保存</div>
+      <div class="comment-box">不应该被保存</div>
     </main>
     <aside class="recommend">推荐内容</aside>
   </body>
@@ -33,6 +34,7 @@ def test_parser_keeps_body_and_removes_non_body_content() -> None:
     assert parsed.metadata.tags == ["Python", "CSDN"]
     assert "这是正文内容" in parsed.body_html
     assert "print('hello')" in parsed.body_html
+    assert "// keep this code comment" in parsed.body_html
     assert "不应该被保存" not in parsed.body_html
     assert "onerror" not in parsed.body_html
     assert parsed.resource_urls == ["https://blog.csdn.net/images/a.png"]
