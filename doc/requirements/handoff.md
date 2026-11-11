@@ -9,9 +9,9 @@
 ## 当前状态
 
 - 第一阶段核心功能已实现并推送到 GitHub。
-- 当前分支：`dev`，本地比 `origin/dev` 多 2 个提交，待推送。
-- 代码折叠功能和本交接文档均已提交，尚未推送本轮提交。
-- OpenSpec 规划和实现任务均已完成，相关变更尚未归档。
+- 当前分支：`dev`，本地仍有尚未推送到 `origin/dev` 的整理提交。
+- 第一阶段所有实现和补充修复已合并回同一个初始 OpenSpec 需求，补丁型变更已归档。
+- 主规格已同步到 `openspec/specs/`，后续迭代从新的 OpenSpec 变更开始，不再为同一初始版本重复拆分需求。
 
 ## 已确认的第一阶段需求
 
@@ -68,7 +68,8 @@ data/blog.csdn.net/<article-id>_<sanitized-title>/article.html
 - 需求概述：[project-overview.md](./project-overview.md)
 - 本地开发说明：[../development.md](../development.md)
 - 项目协作规范：[../../AGENTS.md](../../AGENTS.md)
-- 当前 OpenSpec 变更：[../../openspec/changes/](../../openspec/changes/)
+- OpenSpec 主规格：[../../openspec/specs/](../../openspec/specs/)
+- OpenSpec 历史归档：[../../openspec/changes/archive/](../../openspec/changes/archive/)
 
 ## 后续迭代建议
 

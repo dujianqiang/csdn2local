@@ -37,6 +37,25 @@ The system SHALL archive the article title and正文内容, including正文中�
 - **WHEN** the article body references images or other required resources
 - **THEN** the system saves those resources under the article's local `assets/` directory and generated HTML references them with local relative paths
 
+### Requirement: Preserve code content and presentation
+
+The system SHALL preserve code text, comments, line breaks, indentation, whitespace, and ASCII/Unicode box-drawing characters from the article body. Generated HTML SHALL render code blocks with a dark visual style and a collapsible control that is collapsed by default, while print and PDF output SHALL keep the code content visible.
+
+#### Scenario: Preserve code comments and box characters
+
+- **WHEN** an article code block contains comments, indentation, line breaks, or box-drawing characters
+- **THEN** the archived HTML retains those characters and their meaningful visual arrangement
+
+#### Scenario: Collapse code blocks in HTML
+
+- **WHEN** the user opens an archived HTML article containing code blocks
+- **THEN** each code block is collapsed by default and can be expanded through its visible control
+
+#### Scenario: Keep code visible in print and PDF
+
+- **WHEN** the archived article is printed or generated as a PDF
+- **THEN** the code content is rendered without being hidden by the HTML collapse control
+
 ### Requirement: Store an archive in the defined local layout
 
 The system SHALL store all article files below the project `data/` directory, using the source URL domain as the first-level directory and an article ID plus sanitized title as the article directory name. The system SHALL save searchable metadata including title, author, publication time, tags, original URL, and save time.

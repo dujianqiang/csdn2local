@@ -41,3 +41,8 @@
 - [x] 6.3 Add resource and output failure tests proving partial archives retain successful files and report missing outputs.
 - [x] 6.4 Add Web/API integration tests for synchronous archive submission, format selection, retry, metadata search, and HTML/PDF link fallback.
 - [x] 6.5 Run OpenSpec validation and the full test suite, then update the project documentation with local startup and usage instructions.
+
+## 7. Consolidate the Initial Version
+
+- [x] 7.1 Fold the final public-page fetching, code preservation, dark code styling, and default-collapse behavior into the initial proposal, design, and capability specification.
+- [x] 7.2 Re-run OpenSpec validation and the full test suite, then prepare the completed initial change for archive as the single first-phase requirement.
