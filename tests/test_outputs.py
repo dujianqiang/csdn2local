@@ -23,10 +23,11 @@ def test_generated_html_wraps_code_blocks_in_open_details() -> None:
     details = soup.select("details.code-block")
 
     assert len(details) == 1
-    assert details[0].has_attr("open")
+    assert not details[0].has_attr("open")
     assert details[0].summary.get_text(strip=True) == "代码块 1"
     assert "line 1\nline 2" in details[0].get_text()
     assert "@media print" in html
+    assert "display: block !important" in html
 
 
 def test_pdf_is_generated_from_offline_html(tmp_path) -> None:

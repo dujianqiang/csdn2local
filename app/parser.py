@@ -201,7 +201,7 @@ def render_article_document(title: str, body_html: str) -> str:
     details.code-block > summary {{ cursor: pointer; padding: .55rem 1rem; background: #21252b; color: #abb2bf; font: 600 0.9rem/1.4 Consolas, "Cascadia Code", "Courier New", monospace; user-select: none; }}
     details.code-block[open] > summary {{ border-bottom: 1px solid #3b4048; }}
     details.code-block pre {{ margin: 0; border: 0; border-radius: 0; }}
-    @media print {{ details.code-block > summary {{ display: none; }} details.code-block {{ border: 0; overflow: visible; }} details.code-block pre {{ border-radius: 8px; }} }}
+    @media print {{ details.code-block > summary {{ display: none; }} details.code-block {{ display: block; border: 0; overflow: visible; }} details.code-block > pre {{ display: block !important; border-radius: 8px; }} }}
   </style>
 </head>
 <body>
@@ -218,7 +218,7 @@ def wrap_code_blocks(body_html: str) -> str:
     soup = BeautifulSoup(body_html, "lxml")
     root = soup.body or soup
     for index, pre in enumerate(root.find_all("pre"), start=1):
-        details = soup.new_tag("details", attrs={"class": "code-block", "open": ""})
+        details = soup.new_tag("details", attrs={"class": "code-block"})
         summary = soup.new_tag("summary")
         summary.string = f"代码块 {index}"
         pre.replace_with(details)
