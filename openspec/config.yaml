@@ -2,8 +2,8 @@ schema: spec-driven
 
 context: |
   Project name: csdn 单个连接下载
-  Product scope: download one public CSDN article URL to local HTML and/or PDF files.
-  The repository is open source and keeps one canonical first-phase requirement.
+  Product scope: download one public CSDN article URL or one public CSDN topic URL to local offline publications.
+  The repository is open source and keeps one canonical specification per product capability.
   Project documents are maintained in Chinese; implementation identifiers may remain English.
   Follow AGENTS.md and complete the OpenSpec workflow before implementation.
 

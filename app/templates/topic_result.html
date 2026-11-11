@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>专题下载结果 - csdn 单个连接下载</title>
+</head>
+<body>
+  <main>
+    <nav aria-label="功能导航">
+      <a href="/">单个地址下载</a>
+      <a href="/topic">专题下载</a>
+    </nav>
+    {% if success %}
+    <h1>{% if partial %}专题下载完成，但存在部分问题{% else %}专题下载成功{% endif %}</h1>
+    <p>{{ result.topic_title }}</p>
+    <p>输出格式：{{ result.output_format|upper }}；并行数量：{{ concurrency }}</p>
+    <p><a href="{{ output_url }}">打开专题输出</a></p>
+    <h2>文章处理结果</h2>
+    <ol>
+      {% for article in result.articles %}
+      <li>
+        {{ article.title or "文章 " ~ article.position }}
+        {% if article.error %}<span>（失败：{{ article.error }}）</span>{% else %}<span>（已完成）</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <h1>专题下载失败</h1>
+    <p role="alert">{{ error }}</p>
+    <form action="/topic" method="post">
+      <input type="hidden" name="topic_url" value="{{ topic_url }}">
+      <input type="hidden" name="output_format" value="{{ output_format }}">
+      <input type="hidden" name="concurrency" value="{{ concurrency }}">
+      <button type="submit">重新下载</button>
+    </form>
+    {% endif %}
+    <p><a href="/topic">返回专题下载</a></p>
+  </main>
+</body>
+</html>

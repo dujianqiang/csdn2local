@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>专题下载 - csdn 单个连接下载</title>
+</head>
+<body>
+  <main>
+    <h1>专题下载</h1>
+    <nav aria-label="功能导航">
+      <a href="/">单个地址下载</a>
+      <a href="/topic">专题下载</a>
+    </nav>
+    <form action="/topic" method="post">
+      <p>
+        <label for="topic-url">CSDN 专题地址</label>
+        <input id="topic-url" name="topic_url" type="url" required placeholder="https://blog.csdn.net/..." size="60">
+      </p>
+      <p>
+        <label for="concurrency">并行数量</label>
+        <input id="concurrency" name="concurrency" type="number" min="1" step="1" value="1" required>
+      </p>
+      <fieldset>
+        <legend>输出格式（单选）</legend>
+        <label><input type="radio" name="output_format" value="html" checked> HTML</label>
+        <label><input type="radio" name="output_format" value="epub"> EPUB 电子书</label>
+        <label><input type="radio" name="output_format" value="pdf"> PDF 电子书</label>
+      </fieldset>
+      <button type="submit">开始下载专题</button>
+    </form>
+    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  </main>
+</body>
+</html>

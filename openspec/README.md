@@ -4,11 +4,13 @@
 
 ## 当前结构
 
-- `specs/csdn-single-url-download/spec.md`：项目唯一主规格，描述首期完整需求。
-- `changes/archive/2026-11-11-csdn-single-url-download/`：符合 OpenSpec 框架格式的首期实现历史归档目录，包含 `.openspec.yaml`、proposal、specs、design 和 tasks。
+- `specs/csdn-single-url-download/spec.md`：单篇文章下载主规格。
+- `specs/csdn-topic-download/spec.md`：CSDN 专题下载主规格。
+- `changes/archive/2026-11-11-csdn-single-url-download/`：单篇下载实现历史归档目录。
+- `changes/archive/2026-11-11-download-csdn-topic/`：专题下载实现历史归档目录。
 - `config.yaml`：OpenSpec 工作流和项目上下文配置。
 
-首期开发过程中曾按问题和实现细节产生多个临时变更目录。它们已经合并为一个项目需求和一个符合 OpenSpec 规范的历史归档变更目录，后续不要为同一首期需求重复创建独立变更。
+首期单篇下载和后续专题下载都保留为完整的 OpenSpec 变更归档目录，后续新增功能应基于对应主规格创建新的变更。
 
 ## 后续迭代规则
 

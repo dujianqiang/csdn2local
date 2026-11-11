@@ -14,10 +14,12 @@ from loguru import logger
 from app.archive import ArchiveFailure, ArchiveService
 from app.config import settings
 from app.fetcher import FetchError
+from app.topic import TopicFailure, TopicService
 
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 archive_service = ArchiveService(settings)
+topic_service = TopicService(settings)
 
 
 @asynccontextmanager
@@ -45,6 +47,15 @@ def home(request: Request, q: str = Query(default="")) -> HTMLResponse:
         request=request,
         name="index.html",
         context={"query": q, "results": results, "error": None},
+    )
+
+
+@app.get("/topic", response_class=HTMLResponse)
+def topic_home(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="topic.html",
+        context={"error": None, "topic_url": "", "output_format": "html", "concurrency": 1},
     )
 
 
@@ -79,6 +90,43 @@ def archive_article(
             "formats": selected,
             "result": result,
             "links": links,
+        },
+    )
+
+
+@app.post("/topic", response_class=HTMLResponse)
+def download_topic(
+    request: Request,
+    topic_url: str = Form(...),
+    output_format: str = Form(default="html"),
+    concurrency: str = Form(default="1"),
+) -> HTMLResponse:
+    try:
+        result = topic_service.download(topic_url, output_format, concurrency)
+    except (FetchError, TopicFailure, ValueError) as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="topic_result.html",
+            context={
+                "success": False,
+                "error": str(exc),
+                "topic_url": topic_url,
+                "output_format": output_format,
+                "concurrency": concurrency,
+            },
+            status_code=400,
+        )
+    return templates.TemplateResponse(
+        request=request,
+        name="topic_result.html",
+        context={
+            "success": True,
+            "partial": result.status == "partial",
+            "result": result,
+            "output_url": _file_url(result.output_path),
+            "topic_url": topic_url,
+            "output_format": output_format,
+            "concurrency": concurrency,
         },
     )
 

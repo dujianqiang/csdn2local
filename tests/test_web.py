@@ -10,6 +10,7 @@ import app.main as main
 from app.archive import ArchiveResult
 from app.models import ArticleMetadata
 from app.storage import ArchivePaths
+from app.topic import TopicArticle, TopicResult
 
 
 class FakeIndex:
@@ -31,6 +32,16 @@ class FakeService:
 
     def archive(self, url: str, formats: list[str]):
         self.calls.append((url, formats))
+        return self.result
+
+
+class FakeTopicService:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def download(self, url: str, output_format: str, concurrency: str):
+        self.calls.append((url, output_format, concurrency))
         return self.result
 
 
@@ -119,3 +130,48 @@ async def test_archive_form_defaults_to_html_and_can_retry(monkeypatch, tmp_path
     assert "文章保存成功" in response.text
     assert fake.calls == [("https://blog.csdn.net/a", ["html"])]
     shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_topic_page_has_navigation_single_format_and_default_concurrency() -> None:
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/topic")
+
+    assert response.status_code == 200
+    assert "单个地址下载" in response.text
+    assert "专题下载" in response.text
+    assert 'name="concurrency"' in response.text
+    assert 'value="1"' in response.text
+    assert 'name="output_format"' in response.text
+    assert response.text.count('name="output_format"') == 3
+
+
+@pytest.mark.asyncio
+async def test_topic_form_submits_single_format_and_concurrency(monkeypatch, tmp_path: Path) -> None:
+    output = tmp_path / "topic.epub"
+    output.write_bytes(b"epub")
+    result = TopicResult(
+        status="success",
+        topic_title="测试专题",
+        topic_url="https://blog.csdn.net/demo/topic",
+        output_format="epub",
+        output_path=output,
+        metadata_path=tmp_path / "metadata.json",
+        articles=[TopicArticle(position=1, url="https://blog.csdn.net/a", title="文章一")],
+    )
+    fake = FakeTopicService(result)
+    monkeypatch.setattr(main, "topic_service", fake)
+    monkeypatch.setattr(main, "_file_url", lambda path: "/files/topic.epub")
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/topic",
+            data={"topic_url": "https://blog.csdn.net/demo/topic", "output_format": "epub", "concurrency": "3"},
+        )
+
+    assert response.status_code == 200
+    assert "测试专题" in response.text
+    assert "/files/topic.epub" in response.text
+    assert fake.calls == [("https://blog.csdn.net/demo/topic", "epub", "3")]
