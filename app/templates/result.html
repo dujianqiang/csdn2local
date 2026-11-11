@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>保存结果 - csdn2local</title>
+</head>
+<body>
+  <main>
+    {% if success %}
+    <h1>{% if partial %}文章已保存，但存在部分问题{% else %}文章保存成功{% endif %}</h1>
+    <p>{{ result.metadata.title }}</p>
+    <ul>
+      {% for link in links %}
+      <li><a href="{{ link.url }}">打开 {{ link.name }}</a></li>
+      {% endfor %}
+    </ul>
+    {% if result.warnings %}
+    <h2>提示</h2>
+    <ul>
+      {% for warning in result.warnings %}<li>{{ warning }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% else %}
+    <h1>文章保存失败</h1>
+    <p>{{ error }}</p>
+    {% endif %}
+    <form action="/archive" method="post">
+      <input type="hidden" name="url" value="{{ url }}">
+      {% for format in formats %}<input type="hidden" name="formats" value="{{ format }}">{% endfor %}
+      <button type="submit">重新下载</button>
+    </form>
+    <p><a href="/">返回</a></p>
+  </main>
+</body>
+</html>

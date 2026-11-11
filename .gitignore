@@ -1,1 +1,10 @@
 .agents/
+.venv/
+.uv-cache/
+.pytest-tmp/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.playwright-browsers/
+data/
+*.egg-info/

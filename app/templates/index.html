@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>csdn2local</title>
+</head>
+<body>
+  <main>
+    <h1>csdn2local</h1>
+    <section>
+      <h2>保存文章</h2>
+      <form action="/archive" method="post">
+        <label for="url">CSDN 文章 URL</label>
+        <input id="url" name="url" type="url" required placeholder="https://blog.csdn.net/..." size="60">
+        <fieldset>
+          <legend>保存格式</legend>
+          <label><input type="checkbox" name="formats" value="html" checked> HTML</label>
+          <label><input type="checkbox" name="formats" value="pdf"> PDF</label>
+        </fieldset>
+        <button type="submit">开始保存</button>
+      </form>
+    </section>
+    <section>
+      <h2>搜索本地文章</h2>
+      <form action="/" method="get">
+        <input name="q" value="{{ query }}" placeholder="标题、域名、URL、作者或标签" size="60">
+        <button type="submit">搜索</button>
+      </form>
+      {% if query %}
+      <h3>搜索结果</h3>
+      {% if results %}
+      <ul>
+        {% for item in results %}
+        <li><a href="{{ item.address }}">{{ item.title }}</a></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>没有找到匹配的文章。</p>
+      {% endif %}
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>
