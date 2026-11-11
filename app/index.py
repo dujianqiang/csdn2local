@@ -92,7 +92,19 @@ class ArticleIndex:
                 """,
                 (term, term, term, term, term),
             ).fetchall()
-        return [self._row_to_result(row) for row in rows]
+        return self._rows_to_results(rows)
+
+    def list_all(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT original_url, archive_dir, title, domain, author, published_at,
+                       tags_json, formats_json, saved_at, warnings_json
+                FROM articles
+                ORDER BY saved_at DESC
+                """
+            ).fetchall()
+        return self._rows_to_results(rows)
 
     def archive_dir_for_url(self, original_url: str) -> Path | None:
         with self.connect() as connection:
@@ -101,6 +113,15 @@ class ArticleIndex:
                 (normalize_url(original_url),),
             ).fetchone()
         return Path(row["archive_dir"]) if row else None
+
+    @classmethod
+    def _rows_to_results(cls, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+        results = []
+        for row in rows:
+            result = cls._row_to_result(row)
+            if result["address"]:
+                results.append(result)
+        return results
 
     @staticmethod
     def _row_to_result(row: sqlite3.Row) -> dict[str, Any]:

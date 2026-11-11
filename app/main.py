@@ -39,7 +39,8 @@ def health() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, q: str = Query(default="")) -> HTMLResponse:
-    results = [_with_file_url(item) for item in archive_service.index.search(q)] if q.strip() else []
+    source_results = archive_service.index.search(q) if q.strip() else archive_service.index.list_all()
+    results = [_with_file_url(item) for item in source_results]
     return templates.TemplateResponse(
         request=request,
         name="index.html",

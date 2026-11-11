@@ -19,6 +19,9 @@ class FakeIndex:
     def search(self, keyword: str):
         return self.result if keyword == "python" else []
 
+    def list_all(self):
+        return self.result
+
 
 class FakeService:
     def __init__(self, result):
@@ -54,6 +57,46 @@ async def test_search_displays_only_title_and_local_address(monkeypatch, tmp_pat
     assert "Python title" in response.text
     assert "/files/test/article.html" in response.text
     assert "https://blog.csdn.net/a" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_home_displays_downloaded_file_list_without_keyword(monkeypatch, tmp_path: Path) -> None:
+    archive = tmp_path / "blog.csdn.net" / "article"
+    archive.mkdir(parents=True)
+    html = archive / "article.html"
+    html.write_text("<html>offline</html>", encoding="utf-8")
+    fake = FakeService(None)
+    fake.index = FakeIndex(
+        [
+            {"title": "Downloaded title", "address": str(html), "original_url": "https://blog.csdn.net/a"},
+        ]
+    )
+    monkeypatch.setattr(main, "archive_service", fake)
+    monkeypatch.setattr(main, "_file_url", lambda path: "/files/test/article.html")
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/")
+
+    assert response.status_code == 200
+    assert "已下载文件" in response.text
+    assert "Downloaded title" in response.text
+    assert "/files/test/article.html" in response.text
+    assert "https://blog.csdn.net/a" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_home_displays_empty_state_without_downloads(monkeypatch) -> None:
+    fake = FakeService(None)
+    fake.index = FakeIndex([])
+    monkeypatch.setattr(main, "archive_service", fake)
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/")
+
+    assert response.status_code == 200
+    assert "暂无已下载文件。" in response.text
 
 
 @pytest.mark.asyncio

@@ -29,15 +29,19 @@
       </form>
       {% if query %}
       <h3>搜索结果</h3>
+      {% else %}
+      <h3>已下载文件</h3>
+      {% endif %}
       {% if results %}
       <ul>
         {% for item in results %}
         <li><a href="{{ item.address }}">{{ item.title }}</a></li>
         {% endfor %}
       </ul>
-      {% else %}
+      {% elif query %}
       <p>没有找到匹配的文章。</p>
-      {% endif %}
+      {% else %}
+      <p>暂无已下载文件。</p>
       {% endif %}
     </section>
   </main>

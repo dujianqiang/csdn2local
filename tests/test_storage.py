@@ -37,3 +37,41 @@ def test_index_upserts_and_searches_metadata(tmp_path) -> None:
     assert len(results) == 1
     assert results[0]["title"] == "First title"
     assert results[0]["address"].endswith("article.html")
+
+
+def test_index_lists_newest_downloads_and_falls_back_to_pdf(tmp_path) -> None:
+    index = ArticleIndex(tmp_path / "index.sqlite3")
+    older = ArticleMetadata(
+        title="Older",
+        original_url="https://blog.csdn.net/a/older",
+        domain="blog.csdn.net",
+        saved_at="2026-01-01T00:00:00+00:00",
+        formats=["pdf"],
+    )
+    newer = ArticleMetadata(
+        title="Newer",
+        original_url="https://blog.csdn.net/a/newer",
+        domain="blog.csdn.net",
+        saved_at="2026-01-02T00:00:00+00:00",
+        formats=["html"],
+    )
+    older_archive = tmp_path / "blog.csdn.net" / "older"
+    newer_archive = tmp_path / "blog.csdn.net" / "newer"
+    older_archive.mkdir(parents=True)
+    newer_archive.mkdir(parents=True)
+    (older_archive / "article.pdf").write_bytes(b"pdf")
+    (newer_archive / "article.html").write_text("<html></html>", encoding="utf-8")
+    index.upsert(older, ArchivePaths(older_archive))
+    index.upsert(newer, ArchivePaths(newer_archive))
+
+    results = index.list_all()
+
+    assert [item["title"] for item in results] == ["Newer", "Older"]
+    assert results[0]["address"].endswith("article.html")
+    assert results[1]["address"].endswith("article.pdf")
+
+
+def test_index_lists_no_records_as_empty(tmp_path) -> None:
+    index = ArticleIndex(tmp_path / "index.sqlite3")
+
+    assert index.list_all() == []
