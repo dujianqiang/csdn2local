@@ -1,41 +1,57 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>专题下载结果 - csdn 单个连接下载</title>
-</head>
-<body>
-  <main>
-    <nav aria-label="功能导航">
-      <a href="/">单个地址下载</a>
-      <a href="/topic">专题下载</a>
-    </nav>
+{% extends "base.html" %}
+{% block title %}{% if success %}专题下载完成{% else %}专题下载失败{% endif %} · csdn2local{% endblock %}
+{% block content %}
+  <section class="state-card" aria-labelledby="result-title">
+    <h1 id="result-title">{% if success %}{% if partial %}专题部分完成{% else %}专题下载完成{% endif %}{% else %}专题下载失败{% endif %}</h1>
     {% if success %}
-    <h1>{% if partial %}专题下载完成，但存在部分问题{% else %}专题下载成功{% endif %}</h1>
-    <p>{{ result.topic_title }}</p>
-    <p>输出格式：{{ result.output_format|upper }}；并行数量：{{ concurrency }}</p>
-    <p><a href="{{ output_url }}">打开专题输出</a></p>
-    <h2>文章处理结果</h2>
-    <ol>
-      {% for article in result.articles %}
-      <li>
-        {{ article.title or "文章 " ~ article.position }}
-        {% if article.error %}<span>（失败：{{ article.error }}）</span>{% else %}<span>（已完成）</span>{% endif %}
-      </li>
-      {% endfor %}
-    </ol>
-    {% else %}
-    <h1>专题下载失败</h1>
-    <p role="alert">{{ error }}</p>
-    <form action="/topic" method="post">
+    <p class="result-name">{{ result.topic_title }}</p>
+    {% endif %}
+    {% if progress and progress.discovered_total > progress.total %}<p class="notice">专题共 {{ progress.discovered_total }} 篇，本次只处理前 {{ progress.total }} 篇。</p>{% endif %}
+    {% if success %}
+    <div class="output-links button-row"><a class="button" href="{{ output_url }}">打开专题 {{ result.output_format|upper }}</a><a href="/topic#topic-history">查看下载记录</a></div>
+    {% elif error %}
+    <p class="notice notice--error" role="alert">{{ error }}</p>
+    {% endif %}
+    {% if articles %}
+    <section class="result-section" aria-labelledby="article-results-title">
+      <h2 id="article-results-title">文章处理结果</h2>
+      <ol class="article-results">
+        {% for article in articles %}
+        <li class="article-result">
+          {% set article_title = article.title or "文章 " ~ article.position %}
+          {% if output_url and result.output_format == "html" and not article.error %}
+          <a class="article-result-title" href="{{ output_url }}#article-{{ article.position }}">{{ article_title }}</a>
+          {% else %}
+          <span class="article-result-title">{{ article_title }}</span>
+          {% endif %}
+          {% if article.error %}
+          <span class="article-result-status is-failed">{{ article.error }} <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer">打开原文</a></span>
+          {% else %}
+          <span class="article-result-status">{{ "已从本地 HTML 导入" if article.source == "saved_html" else "已完成" }}</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </section>
+    {% endif %}
+    {% if result and result.warnings %}
+    <details class="notice"><summary>查看 {{ result.warnings|length }} 条保存提示</summary>
+      <ul>{% for warning in result.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+    {% if edit_url %}
+    <form class="result-section" action="/topic" method="post" enctype="multipart/form-data" data-pending="正在创建任务…">
       <input type="hidden" name="topic_url" value="{{ topic_url }}">
       <input type="hidden" name="output_format" value="{{ output_format }}">
       <input type="hidden" name="concurrency" value="{{ concurrency }}">
-      <button type="submit">重新下载</button>
+      {% if not success or partial %}{% include "topic_html_input.html" %}{% endif %}
+      <div class="button-row">
+        <button class="button--quiet" type="submit">重新下载专题</button>
+        <a href="{{ edit_url }}">修改设置</a>
+        <span class="submit-feedback" role="status"></span>
+      </div>
     </form>
     {% endif %}
-    <p><a href="/topic">返回专题下载</a></p>
-  </main>
-</body>
-</html>
+    <div class="button-row"><a href="/topic">返回专题配置</a>{% if not success %}<a href="/topic#topic-history">查看下载记录</a>{% endif %}</div>
+  </section>
+{% endblock %}

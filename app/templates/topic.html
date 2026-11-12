@@ -1,35 +1,59 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>专题下载 - csdn 单个连接下载</title>
-</head>
-<body>
-  <main>
-    <h1>专题下载</h1>
-    <nav aria-label="功能导航">
-      <a href="/">单个地址下载</a>
-      <a href="/topic">专题下载</a>
-    </nav>
-    <form action="/topic" method="post">
-      <p>
+{% extends "base.html" %}
+{% block title %}专题下载 · csdn2local{% endblock %}
+{% block content %}
+  <section class="page-heading" aria-labelledby="page-title">
+    <div><h1 id="page-title">保存专题</h1><p>按原顺序归档 CSDN 专题，合成一个带目录的文件。</p></div>
+    <a href="#topic-history">查看下载记录</a>
+  </section>
+
+  <section class="primary-task" aria-label="专题下载表单">
+    {% if active_job_url %}
+    <p class="notice"><a href="{{ active_job_url }}">查看正在下载的专题</a></p>
+    {% endif %}
+    {% if error %}<p class="notice notice--error" role="alert">{{ error }}</p>{% endif %}
+    <form action="/topic" method="post" enctype="multipart/form-data" data-pending="正在创建任务…">
+      <div class="field">
         <label for="topic-url">CSDN 专题地址</label>
-        <input id="topic-url" name="topic_url" type="url" required placeholder="https://blog.csdn.net/..." size="60">
-      </p>
-      <p>
-        <label for="concurrency">并行数量</label>
-        <input id="concurrency" name="concurrency" type="number" min="1" step="1" value="1" required>
-      </p>
-      <fieldset>
-        <legend>输出格式（单选）</legend>
-        <label><input type="radio" name="output_format" value="html" checked> HTML</label>
-        <label><input type="radio" name="output_format" value="epub"> EPUB 电子书</label>
-        <label><input type="radio" name="output_format" value="pdf"> PDF 电子书</label>
+        <input id="topic-url" name="topic_url" type="url" required value="{{ topic_url }}" placeholder="https://blog.csdn.net/…/category_….html" autocomplete="url" {% if article_limit %}aria-describedby="topic-limit"{% endif %}>
+        {% if article_limit %}<p id="topic-limit" class="hint">试下载最多保存前 {{ article_limit }} 篇。</p>{% endif %}
+      </div>
+      <fieldset class="choice-group">
+        <legend>输出格式 <span class="hint">单选</span></legend>
+        <div class="choice-grid">
+          {% for format in ("html", "epub", "pdf") %}
+          <label class="choice"><input type="radio" name="output_format" value="{{ format }}" required {% if output_format == format %}checked{% endif %}> {{ format|upper }}</label>
+          {% endfor %}
+        </div>
       </fieldset>
-      <button type="submit">开始下载专题</button>
+      <details class="advanced" {% if error or concurrency|string != "1" %}open{% endif %}>
+        <summary>高级设置</summary>
+        <div class="field concurrency-field">
+          <label for="concurrency">并行数量</label>
+          <input id="concurrency" name="concurrency" type="number" min="1" step="1" value="{{ concurrency }}" required>
+        </div>
+        {% include "topic_html_input.html" %}
+      </details>
+      <div class="button-row"><button type="submit">开始下载专题</button><span class="submit-feedback" role="status"></span></div>
     </form>
-    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
-  </main>
-</body>
-</html>
+  </section>
+
+  <section class="library" id="topic-history" aria-labelledby="topic-history-title">
+    <div class="library-heading"><h2 id="topic-history-title">专题下载记录</h2></div>
+    {% if history %}
+    <ul class="result-list">
+      {% for record, file_url in history %}
+      <li>
+        <a class="result-title" href="{{ file_url }}">{{ record.title }}</a>
+        <div class="history-meta">
+          <span>{{ record.output_format|upper }}</span>
+          {% if record.preview %}<span>试下载</span>{% endif %}
+          <time datetime="{{ record.saved_at.isoformat() }}">{{ record.saved_at.strftime('%Y-%m-%d %H:%M') }}</time>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-state">暂无专题下载记录。</p>
+    {% endif %}
+  </section>
+{% endblock %}

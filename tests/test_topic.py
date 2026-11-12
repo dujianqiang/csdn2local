@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from threading import Event
+from unittest.mock import Mock
 from zipfile import ZipFile
 
 import pytest
 
 import app.topic as topic_module
+from app.archive import ArchiveService
 from app.config import Settings
 from app.fetcher import FetchError, PageSnapshot
-from app.parser import ParsedArticle
+from app.parser import ArticleParser, ParsedArticle
 from app.models import ArticleMetadata
 from app.resources import ResourceDownloadResult
-from app.topic import TopicService
+from app.topic import TopicFailure, TopicProgress, TopicService
 
 
 TOPIC_URL = "https://blog.csdn.net/demo/topic"
@@ -19,11 +23,16 @@ ARTICLE_ONE = "https://blog.csdn.net/demo/article/details/1"
 ARTICLE_TWO = "https://blog.csdn.net/demo/article/details/2"
 
 
+@pytest.fixture(autouse=True)
+def skip_topic_batch_delays(monkeypatch):
+    monkeypatch.setattr(topic_module, "sleep", Mock())
+
+
 class FakeFetcher:
     def __init__(self, failed: str | None = None):
         self.failed = failed
 
-    def fetch(self, url: str) -> PageSnapshot:
+    def fetch(self, url: str, *, referer: str | None = None) -> PageSnapshot:
         if url == TOPIC_URL:
             html = f"<html><head><title>测试专题</title></head><body><a href='{ARTICLE_ONE}'>一</a><a href='{ARTICLE_TWO}'>二</a><a href='{ARTICLE_ONE}'>重复</a></body></html>"
             return PageSnapshot(url, url, html)
@@ -51,11 +60,11 @@ class FakeResources:
 
 
 def make_service(tmp_path: Path, failed: str | None = None) -> TopicService:
-    service = TopicService(Settings.from_project_root(tmp_path))
-    service.fetcher = FakeFetcher(failed)
-    service.parser = FakeParser()
-    service.resources = FakeResources()
-    return service
+    archive_service = ArchiveService(Settings.from_project_root(tmp_path))
+    archive_service.fetcher = FakeFetcher(failed)
+    archive_service.parser = FakeParser()
+    archive_service.resources = FakeResources()
+    return TopicService(archive_service)
 
 
 def test_discover_topic_links_preserves_order_and_deduplicates() -> None:
@@ -66,6 +75,32 @@ def test_discover_topic_links_preserves_order_and_deduplicates() -> None:
 
     assert title == "专题标题"
     assert urls == [ARTICLE_TWO, ARTICLE_ONE]
+
+
+def test_discover_column_ignores_sidebar_articles() -> None:
+    column_url = "https://blog.csdn.net/demo/category_123.html"
+    unrelated = "https://blog.csdn.net/demo/article/details/999"
+    html = f"""
+    <title>页面标题</title>
+    <aside><a href="{unrelated}">热门文章</a></aside>
+    <main id="column">
+      <h3 class="column_title">实际专栏标题</h3>
+      <ul class="column_article_list">
+        <li><a href="{ARTICLE_TWO}">目录第一篇</a></li>
+        <li><a href="{ARTICLE_ONE}">目录第二篇</a></li>
+        <li><a href="{ARTICLE_TWO}#section">重复链接</a></li>
+      </ul>
+    </main>
+    """
+
+    assert TopicService.discover(html, column_url) == ("实际专栏标题", [ARTICLE_TWO, ARTICLE_ONE])
+
+
+def test_discover_column_without_article_list_does_not_use_sidebar() -> None:
+    url = "https://blog.csdn.net/demo/category_123_2.html"
+    html = f'<aside><a href="{ARTICLE_ONE}">热门文章</a></aside>'
+
+    assert TopicService.discover(html, url)[1] == []
 
 
 def test_topic_download_preserves_order_and_selected_epub(tmp_path: Path) -> None:
@@ -84,6 +119,25 @@ def test_topic_download_preserves_order_and_selected_epub(tmp_path: Path) -> Non
         assert "nav" in book.read("OEBPS/package.opf").decode("utf-8")
 
 
+def test_single_and_topic_share_article_preparation(monkeypatch, tmp_path: Path) -> None:
+    topic_service = make_service(tmp_path)
+    archive_service = topic_service.archive_service
+    prepare = Mock(wraps=archive_service.prepare_article)
+    monkeypatch.setattr(archive_service, "prepare_article", prepare)
+
+    single = archive_service.archive(ARTICLE_ONE)
+    topic = topic_service.download(TOPIC_URL, concurrency=2)
+
+    assert prepare.call_args_list[0].args[0] == ARTICLE_ONE
+    topic_calls = [call.args for call in prepare.call_args_list[1:]]
+    assert sorted(url for url, _ in topic_calls) == [ARTICLE_ONE, ARTICLE_TWO]
+    assert {call.kwargs["referer"] for call in prepare.call_args_list[1:]} == {TOPIC_URL}
+    assert len({assets_dir for _, assets_dir in topic_calls}) == 2
+    assert [article.title for article in topic.articles] == ["文章 1", "文章 2"]
+    assert [item["title"] for item in archive_service.index.list_all()] == ["文章 1"]
+    assert list(single.paths.archive_dir.parent.glob("*/article.html")) == [single.paths.html]
+
+
 def test_topic_download_continues_after_article_failure(tmp_path: Path) -> None:
     service = make_service(tmp_path, ARTICLE_TWO)
 
@@ -96,6 +150,63 @@ def test_topic_download_continues_after_article_failure(tmp_path: Path) -> None:
     html = result.output_path.read_text(encoding="utf-8")
     assert html.index("文章 1") < html.index("文章 2")
     assert "下载失败" in html
+
+
+def test_parallel_progress_reports_completed_articles_before_sorting(monkeypatch, tmp_path: Path) -> None:
+    service = make_service(tmp_path, ARTICLE_TWO)
+    download_article = service._download_article
+    first_completion_reported = Event()
+    updates = []
+
+    def download_with_slow_first(position, url, work_root, saved_html=None, *, referer=None):
+        if position == 1:
+            assert first_completion_reported.wait(timeout=3)
+        return download_article(position, url, work_root, saved_html, referer=referer)
+
+    def report(progress: TopicProgress) -> None:
+        updates.append(progress)
+        if progress.processed == 1:
+            first_completion_reported.set()
+
+    monkeypatch.setattr(service, "_download_article", download_with_slow_first)
+    result = service.download(TOPIC_URL, concurrency=2, on_progress=report)
+
+    assert updates == [
+        TopicProgress("downloading", 2, discovered_total=2),
+        TopicProgress("downloading", 2, 1, 1, 2),
+        TopicProgress("downloading", 2, 2, 1, 2),
+        TopicProgress("exporting", 2, 2, 1, 2),
+    ]
+    assert [article.url for article in result.articles] == [ARTICLE_ONE, ARTICLE_TWO]
+
+
+def test_topic_preview_downloads_first_five_without_overwriting_full_export(monkeypatch, tmp_path: Path) -> None:
+    urls = [ARTICLE_TWO, ARTICLE_ONE] + [
+        f"https://blog.csdn.net/demo/article/details/{number}" for number in range(3, 7)
+    ]
+    monkeypatch.setattr(TopicService, "discover", staticmethod(lambda *_: ("测试专题", urls)))
+
+    monkeypatch.setenv("CSDN2LOCAL_TOPIC_ARTICLE_LIMIT", "0")
+    full = make_service(tmp_path).download(TOPIC_URL)
+    full_html = full.output_path.read_bytes()
+
+    monkeypatch.delenv("CSDN2LOCAL_TOPIC_ARTICLE_LIMIT")
+    preview_service = make_service(tmp_path)
+    fetcher = preview_service.archive_service.fetcher
+    fetch = Mock(wraps=fetcher.fetch)
+    monkeypatch.setattr(fetcher, "fetch", fetch)
+    updates = []
+    preview = preview_service.download(TOPIC_URL, on_progress=updates.append)
+
+    assert [article.url for article in full.articles] == urls
+    assert [article.url for article in preview.articles] == urls[:5]
+    assert [call.args[0] for call in fetch.call_args_list] == [TOPIC_URL, *urls[:5]]
+    assert updates[-1] == TopicProgress("exporting", 5, 5, 0, 6)
+    assert preview.output_path != full.output_path
+    assert full.output_path.read_bytes() == full_html
+    metadata = json.loads(preview.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["article_limit"] == 5
+    assert metadata["discovered_article_count"] == 6
 
 
 def test_topic_download_generates_selected_pdf(monkeypatch, tmp_path: Path) -> None:
@@ -112,6 +223,30 @@ def test_topic_download_generates_selected_pdf(monkeypatch, tmp_path: Path) -> N
     assert result.output_path.read_bytes().startswith(b"%PDF")
 
 
+def test_topic_waits_one_second_between_completed_batches(monkeypatch, tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    urls = [f"https://blog.csdn.net/demo/article/details/{number}" for number in range(1, 6)]
+    monkeypatch.setattr(service, "discover", lambda *_: ("测试专题", urls))
+    started = []
+    updates = []
+    pauses = []
+    download_article = service._download_article
+
+    def download(position, url, work_root, saved_html=None, *, referer=None):
+        started.append(position)
+        return download_article(position, url, work_root, saved_html, referer=referer)
+
+    def pause(seconds):
+        pauses.append((seconds, updates[-1].processed, set(started)))
+
+    monkeypatch.setattr(service, "_download_article", download)
+    monkeypatch.setattr(topic_module, "sleep", pause)
+    result = service.download(TOPIC_URL, concurrency=2, on_progress=updates.append)
+
+    assert pauses == [(1, 2, {1, 2}), (1, 4, {1, 2, 3, 4})]
+    assert [article.url for article in result.articles] == urls
+
+
 def test_topic_output_and_concurrency_validation() -> None:
     assert TopicService.normalize_output_format("EPUB") == "epub"
     assert TopicService.normalize_concurrency("1") == 1
@@ -119,3 +254,48 @@ def test_topic_output_and_concurrency_validation() -> None:
         TopicService.normalize_output_format("html,pdf")
     with pytest.raises(ValueError):
         TopicService.normalize_concurrency(0)
+
+
+def test_topic_exports_browser_saved_articles_when_online_pages_are_blocked(monkeypatch, tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    service.archive_service.parser = ArticleParser()
+    fetch_topic = service.archive_service.fetcher.fetch
+
+    def fetch(url, *, referer=None):
+        if url != TOPIC_URL:
+            raise FetchError("CSDN 安全防护拦截（HTTP 521）")
+        return fetch_topic(url)
+
+    fetch_page = Mock(side_effect=fetch)
+    monkeypatch.setattr(service.archive_service.fetcher, "fetch", fetch_page)
+
+    with pytest.raises(TopicFailure) as failed:
+        service.download(TOPIC_URL)
+    assert [article.url for article in failed.value.articles] == [ARTICLE_ONE, ARTICLE_TWO]
+
+    fetch_page.reset_mock()
+    result = service.download(
+        TOPIC_URL,
+        saved_articles={
+            "2": f'<link rel="canonical" href="{ARTICLE_TWO}"><title>本地第二篇</title><div id="content_views">第二篇正文</div>',
+            "1": f'<link rel="canonical" href="{ARTICLE_ONE}"><title>本地第一篇</title><div id="content_views">第一篇正文<script>不保留的脚本</script></div>',
+        },
+    )
+
+    fetch_page.assert_called_once_with(TOPIC_URL)
+    assert result.status == "success"
+    assert [article.source for article in result.articles] == ["saved_html", "saved_html"]
+    output = result.output_path.read_text(encoding="utf-8")
+    assert output.index("第一篇正文") < output.index("第二篇正文")
+    assert "不保留的脚本" not in output
+
+
+def test_topic_rejects_saved_html_for_a_different_article(tmp_path: Path) -> None:
+    service = make_service(tmp_path, ARTICLE_TWO)
+    service.archive_service.parser = ArticleParser()
+
+    with pytest.raises(TopicFailure, match="原文地址与文件名中的文章 ID 不一致"):
+        service.download(
+            TOPIC_URL,
+            saved_articles={"1": f'<link rel="canonical" href="{ARTICLE_TWO}"><div id="content_views">正文</div>'},
+        )

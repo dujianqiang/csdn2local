@@ -14,7 +14,7 @@ from app.resources import ResourceDownloadResult
 
 
 class FakeFetcher:
-    def fetch(self, url: str) -> PageSnapshot:
+    def fetch(self, url: str, *, referer: str | None = None) -> PageSnapshot:
         return PageSnapshot(url, url, "<html></html>")
 
 

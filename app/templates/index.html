@@ -1,53 +1,46 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>csdn 单个连接下载</title>
-</head>
-<body>
-  <main>
-    <h1>csdn 单个连接下载</h1>
-    <nav aria-label="功能导航">
-      <a href="/">单个地址下载</a>
-      <a href="/topic">专题下载</a>
-    </nav>
-    <section>
-      <h2>保存文章</h2>
-      <form action="/archive" method="post">
-        <label for="url">CSDN 文章 URL</label>
-        <input id="url" name="url" type="url" required placeholder="https://blog.csdn.net/..." size="60">
-        <fieldset>
-          <legend>保存格式</legend>
-          <label><input type="checkbox" name="formats" value="html" checked> HTML</label>
-          <label><input type="checkbox" name="formats" value="pdf"> PDF</label>
-        </fieldset>
-        <button type="submit">开始保存</button>
+{% extends "base.html" %}
+{% block title %}单篇下载 · csdn2local{% endblock %}
+{% block content %}
+  <section class="page-heading" aria-labelledby="page-title">
+    <div><h1 id="page-title">保存单篇文章</h1><p>把公开的 CSDN 文章保存为离线文件。</p></div>
+    <a href="#library">查看下载记录</a>
+  </section>
+
+  <section class="primary-task" aria-label="单篇下载表单">
+    <form action="/archive" method="post" data-pending="正在保存…">
+      <div class="field">
+        <label for="url">CSDN 文章地址</label>
+        <input id="url" name="url" type="url" required value="{{ url }}" placeholder="https://blog.csdn.net/…/article/details/…" autocomplete="url">
+      </div>
+      <fieldset class="choice-group">
+        <legend>保存格式 <span class="hint">可多选</span></legend>
+        <div class="choice-grid">
+          <label class="choice"><input type="checkbox" name="formats" value="html" {% if "html" in formats %}checked{% endif %}> HTML</label>
+          <label class="choice"><input type="checkbox" name="formats" value="pdf" {% if "pdf" in formats %}checked{% endif %}> PDF</label>
+        </div>
+      </fieldset>
+      <div class="button-row"><button type="submit">开始保存</button><span class="submit-feedback" role="status"></span></div>
+    </form>
+  </section>
+
+  <section class="library" id="library" aria-labelledby="library-title">
+    <div class="library-heading">
+      <h2 id="library-title">单篇下载记录</h2>
+      <form class="search-form" action="/#library" method="get">
+        <label class="sr-only" for="search">搜索本地文章</label>
+        <input id="search" name="q" type="search" value="{{ query }}" placeholder="标题、域名、作者或标签">
+        <button class="button--quiet" type="submit">搜索</button>
       </form>
-    </section>
-    <section>
-      <h2>搜索本地文章</h2>
-      <form action="/" method="get">
-        <input name="q" value="{{ query }}" placeholder="标题、域名、URL、作者或标签" size="60">
-        <button type="submit">搜索</button>
-      </form>
-      {% if query %}
-      <h3>搜索结果</h3>
-      {% else %}
-      <h3>已下载文件</h3>
-      {% endif %}
-      {% if results %}
-      <ul>
-        {% for item in results %}
-        <li><a href="{{ item.address }}">{{ item.title }}</a></li>
-        {% endfor %}
-      </ul>
-      {% elif query %}
-      <p>没有找到匹配的文章。</p>
-      {% else %}
-      <p>暂无已下载文件。</p>
-      {% endif %}
-    </section>
-  </main>
-</body>
-</html>
+    </div>
+    {% if query %}<p class="hint">搜索“{{ query }}” <a href="/#library">清除搜索</a></p>{% endif %}
+    {% if results %}
+    <ul class="result-list">
+      {% for item in results %}
+      <li><a class="result-title" href="{{ item.address }}">{{ item.title }}</a></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-state">{% if query %}没有找到匹配的文章。{% else %}这里还没有文章。保存后可从这里打开。{% endif %}</p>
+    {% endif %}
+  </section>
+{% endblock %}

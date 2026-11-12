@@ -1,36 +1,32 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>保存结果 - csdn2local</title>
-</head>
-<body>
-  <main>
+{% extends "base.html" %}
+{% block title %}{% if success %}保存完成{% else %}保存失败{% endif %} · csdn2local{% endblock %}
+{% block content %}
+  <section class="state-card" aria-labelledby="result-title">
+    <h1 id="result-title">{% if success %}{% if partial %}文章已保存，部分内容有缺失{% else %}文章保存完成{% endif %}{% else %}文章保存失败{% endif %}</h1>
     {% if success %}
-    <h1>{% if partial %}文章已保存，但存在部分问题{% else %}文章保存成功{% endif %}</h1>
-    <p>{{ result.metadata.title }}</p>
-    <ul>
-      {% for link in links %}
-      <li><a href="{{ link.url }}">打开 {{ link.name }}</a></li>
-      {% endfor %}
-    </ul>
+    <p class="result-name">{{ result.metadata.title }}</p>
+    <div class="button-row">
+      {% for link in links %}<a class="button {% if not loop.first %}button--quiet{% endif %}" href="{{ link.url }}">打开 {{ link.name }}</a>{% endfor %}
+    </div>
     {% if result.warnings %}
-    <h2>提示</h2>
-    <ul>
-      {% for warning in result.warnings %}<li>{{ warning }}</li>{% endfor %}
-    </ul>
+    <details class="notice">
+      <summary>查看 {{ result.warnings|length }} 条保存提示</summary>
+      <ul>{% for warning in result.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+    </details>
     {% endif %}
+    <div class="button-row"><a href="/#library">查看下载记录</a><a href="/">保存另一篇</a></div>
     {% else %}
-    <h1>文章保存失败</h1>
-    <p>{{ error }}</p>
+    <p class="notice notice--error" role="alert">{{ error }}</p>
+    <p class="hint source-url">{{ url }}</p>
+    <div class="button-row">
+      <a class="button" href="{{ edit_url }}">修改设置</a>
+      <form action="/archive" method="post" data-pending="正在保存…">
+        <input type="hidden" name="url" value="{{ url }}">
+        {% for format in formats %}<input type="hidden" name="formats" value="{{ format }}">{% endfor %}
+        <button class="button--quiet" type="submit">重试</button>
+      </form>
+      <a href="/#library">查看下载记录</a>
+    </div>
     {% endif %}
-    <form action="/archive" method="post">
-      <input type="hidden" name="url" value="{{ url }}">
-      {% for format in formats %}<input type="hidden" name="formats" value="{{ format }}">{% endfor %}
-      <button type="submit">重新下载</button>
-    </form>
-    <p><a href="/">返回</a></p>
-  </main>
-</body>
-</html>
+  </section>
+{% endblock %}

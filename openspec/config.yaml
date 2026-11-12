@@ -5,7 +5,8 @@ context: |
   Product scope: download one public CSDN article URL or one public CSDN topic URL to local offline publications.
   The repository is open source and keeps one canonical specification per product capability.
   Project documents are maintained in Chinese; implementation identifiers may remain English.
-  Follow AGENTS.md and complete the OpenSpec workflow before implementation.
+  Follow AGENTS.md. Keep all pre-release fixes and verification in the original change.
+  The user confirms release readiness and owns main-spec synchronization and archiving.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

@@ -5,17 +5,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.config import Settings
-from app.fetcher import FetchError, PageFetcher
+from app.fetcher import PageFetcher
 from app.index import ArticleIndex
 from app.models import ArticleMetadata
 from app.outputs import OutputError, write_html, write_pdf
-from app.parser import ArticleParser
+from app.parser import ArticleParser, ParsedArticle
 from app.resources import ResourceDownloader
 from app.storage import ArchivePaths, ArchiveStore
 
 
 class ArchiveFailure(RuntimeError):
     """An archive request could not produce any selected output."""
+
+
+@dataclass
+class PreparedArticle:
+    metadata: ArticleMetadata
+    body_html: str
+    warnings: list[str]
 
 
 @dataclass
@@ -35,19 +42,30 @@ class ArchiveService:
         self.store = ArchiveStore(settings)
         self.index = ArticleIndex(settings.index_path)
 
+    def prepare_article(self, url: str, assets_dir: Path, *, referer: str | None = None) -> PreparedArticle:
+        snapshot = self.fetcher.fetch(url, referer=referer)
+        parsed = self.parser.parse(snapshot.html, snapshot.final_url)
+        return self._localize_article(parsed, snapshot.final_url, assets_dir)
+
+    def prepare_saved_article(self, url: str, html: str, assets_dir: Path) -> PreparedArticle:
+        PageFetcher.check_page_access(url, html)
+        parsed = self.parser.parse(html, url, saved_html=True)
+        return self._localize_article(parsed, url, assets_dir)
+
+    def _localize_article(self, parsed: ParsedArticle, url: str, assets_dir: Path) -> PreparedArticle:
+        resources = self.resources.download(parsed.body_html, url, assets_dir)
+        return PreparedArticle(parsed.metadata, resources.body_html, resources.warnings)
+
     def archive(self, url: str, formats: list[str] | None = None) -> ArchiveResult:
         selected = self._normalize_formats(formats)
-        snapshot = self.fetcher.fetch(url)
-        parsed = self.parser.parse(snapshot.html, snapshot.final_url)
-        metadata = parsed.metadata
         staging = self.store.create_staging()
-        warnings: list[str] = []
         generated: list[str] = []
         try:
             staging.archive_dir.mkdir(parents=True, exist_ok=True)
-            resource_result = self.resources.download(parsed.body_html, snapshot.final_url, staging.assets)
-            warnings.extend(resource_result.warnings)
-            body_html = resource_result.body_html
+            prepared = self.prepare_article(url, staging.assets)
+            metadata = prepared.metadata
+            warnings = list(prepared.warnings)
+            body_html = prepared.body_html
             if "html" in selected:
                 try:
                     write_html(staging.html, metadata.title, body_html)

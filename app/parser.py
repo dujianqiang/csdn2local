@@ -60,9 +60,24 @@ class ArticleParser:
         "[id*='advert']",
     )
 
-    def parse(self, html: str, source_url: str) -> ParsedArticle:
+    def parse(self, html: str, source_url: str, *, saved_html: bool = False) -> ParsedArticle:
         soup = BeautifulSoup(html, "lxml")
-        body = self._find_body(soup)
+        if saved_html:
+            expected_id = self._article_id(source_url, soup)
+            canonical = soup.select_one("link[rel~=canonical][href]")
+            if canonical is not None:
+                canonical_path = urlsplit(str(canonical["href"])).path
+                declared_id = re.search(r"/article/details/(\d+)(?:/|$)", canonical_path)
+                if declared_id and declared_id.group(1) != expected_id:
+                    raise ValueError("HTML 中的原文地址与文件名中的文章 ID 不一致")
+            body = soup.select_one("#content_views, .article_content, .article-body")
+            if body is not None:
+                for node in body.select("base, meta, link, object, embed, form"):
+                    node.decompose()
+                if not body.get_text(strip=True) and not body.select_one("img, video, audio"):
+                    body = None
+        else:
+            body = self._find_body(soup)
         if body is None:
             raise ValueError("未找到 CSDN 文章正文")
         for selector in self.REMOVE_SELECTORS:
