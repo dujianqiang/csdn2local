@@ -7,4 +7,11 @@ __pycache__/
 .pytest_cache/
 .playwright-browsers/
 data/
+# Local article index and SQLite sidecar files
+index.sqlite3
+index.sqlite3-*
+index.sqlite
+index.sqlite-*
+index.sqllite
+index.sqllite-*
 *.egg-info/
