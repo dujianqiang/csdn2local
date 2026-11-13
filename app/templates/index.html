@@ -12,13 +12,14 @@
         <label for="url">CSDN 文章地址</label>
         <input id="url" name="url" type="url" required value="{{ url }}" placeholder="https://blog.csdn.net/…/article/details/…" autocomplete="url">
       </div>
-      <fieldset class="choice-group">
+      <fieldset class="choice-group" aria-describedby="pdf-runtime-help">
         <legend>保存格式 <span class="hint">单选</span></legend>
         <div class="choice-grid">
           {% for format in output_formats|default(("html", "pdf")) %}
           <label class="choice"><input type="radio" name="formats" value="{{ format }}" required {% if format == selected_format %}checked{% endif %}> {{ "Markdown" if format == "md" else format|upper }}</label>
           {% endfor %}
         </div>
+        <p class="hint" id="pdf-runtime-help">首次导出 PDF 时会自动下载 Chromium，可能需要几分钟。</p>
       </fieldset>
       <div class="button-row"><button type="submit">开始保存</button><span class="submit-feedback" role="status"></span></div>
     </form>

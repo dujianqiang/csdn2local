@@ -3,7 +3,6 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from functools import partial
-import os
 from pathlib import Path
 import re
 from tempfile import SpooledTemporaryFile
@@ -15,7 +14,6 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from loguru import logger
 from starlette.background import BackgroundTask
 
 from app.archive import ArchiveFailure, ArchiveService
@@ -38,9 +36,6 @@ topic_jobs = TopicJobs()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
-    browser_cache = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", Path.home() / "AppData" / "Local" / "ms-playwright"))
-    if not browser_cache.exists():
-        logger.warning("PDF output is unavailable until Playwright Chromium is installed")
     yield
 
 

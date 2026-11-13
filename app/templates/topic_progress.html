@@ -16,6 +16,9 @@
       <p id="topic-preview" class="notice" {% if job.progress.discovered_total <= job.progress.total %}hidden{% endif %}>专题共 {{ job.progress.discovered_total }} 篇，本次只处理前 {{ job.progress.total }} 篇。</p>
       <p id="topic-connection" role="status" class="notice notice--error" hidden>暂时无法更新进度。可以手动刷新。</p>
     </div>
+    {% if job.output_format == "pdf" %}
+    <p class="hint">首次导出 PDF 时，任务会在生成文件前自动下载 Chromium，可能需要几分钟。</p>
+    {% endif %}
     <p class="hint">关闭或离开页面后，任务仍会在后台运行。</p>
     <div class="button-row">
       <a class="button button--quiet" href="{{ job_url }}">刷新进度</a>

@@ -231,6 +231,7 @@ async def test_single_failure_edit_restores_url_and_selected_format(monkeypatch)
         assert form.select_one('input[name="url"]')["value"] == source
         assert [field["value"] for field in form.select('input[name="formats"][type="radio"]')] == ["html", "pdf", "md"]
         assert [field["value"] for field in form.select('input[name="formats"][checked]')] == ["pdf"]
+        assert "首次导出 PDF 时会自动下载 Chromium" in form.select_one("#pdf-runtime-help").get_text()
 
 
 @pytest.mark.asyncio
@@ -250,6 +251,7 @@ async def test_topic_page_has_navigation_single_format_and_default_concurrency(m
         "html", "epub", "pdf", "md",
     ]
     assert [field["value"] for field in page.select('input[name="output_format"][checked]')] == ["html"]
+    assert "首次导出 PDF 时会自动下载 Chromium" in page.select_one("#pdf-runtime-help").get_text()
     assert "暂无专题下载记录" in response.text
     assert page.select_one('input[name="article_limit"]')["value"] == "5"
 
@@ -400,6 +402,7 @@ async def test_topic_form_submits_single_format_and_concurrency(monkeypatch, tmp
             assert progress.status_code == 200
             assert progress.headers["Cache-Control"] == "no-store"
             assert "正在下载文章" in progress.text
+            assert ("自动下载 Chromium" in progress.text) == (output_format == "pdf")
             assert "1 / 2" in progress.text
             assert "失败文章" in progress.text
             assert "专题共 3 篇，本次只处理前 2 篇" in progress.text

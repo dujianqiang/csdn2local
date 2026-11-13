@@ -40,27 +40,29 @@ python3 -m venv .venv
 
 ### 启用 PDF
 
-首次保存 PDF 前，在项目目录安装 Chromium。HTML、EPUB 和 Markdown 可直接使用。
+首次提交 PDF 导出时，程序会自动下载当前 Playwright 需要的无界面 Chromium，可能需要几分钟。后续导出会复用本地缓存。HTML、EPUB 和 Markdown 可直接使用。
+
+如需提前安装，或自动下载失败后手动安装，请在项目目录执行对应命令。
 
 **Windows（PowerShell）**
 
 ```powershell
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD ".playwright-browsers"
-.\.venv\Scripts\python.exe -m playwright install chromium
+.\.venv\Scripts\python.exe -m playwright install --only-shell chromium
 ```
 
 **Linux**
 
 ```bash
-PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers" ./.venv/bin/python -m playwright install --with-deps chromium
+PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers" ./.venv/bin/python -m playwright install --with-deps --only-shell chromium
 ```
 
-`--with-deps` 会一并安装 Chromium 需要的系统依赖，可能要求管理员权限。
+`--with-deps` 会一并安装 Chromium 需要的系统依赖，可能要求管理员权限。如果浏览器已自动下载，只需运行 `./.venv/bin/python -m playwright install-deps chromium` 补装系统依赖，然后重试 PDF 导出。
 
 **macOS**
 
 ```bash
-PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers" ./.venv/bin/python -m playwright install chromium
+PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers" ./.venv/bin/python -m playwright install --only-shell chromium
 ```
 
 PDF 导出支持的系统版本和 Linux 发行版见 [Playwright 系统要求](https://playwright.dev/python/docs/intro#system-requirements)。
