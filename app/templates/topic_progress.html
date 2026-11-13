@@ -2,11 +2,12 @@
 {% block title %}专题下载进度 · csdn2local{% endblock %}
 {% block extra_head %}<noscript><meta http-equiv="refresh" content="2"></noscript>{% endblock %}
 {% block content %}
-  <section class="state-card" aria-labelledby="progress-title" data-progress-url="{{ status_url }}" data-job-url="{{ job_url }}" data-format="{{ job.output_format|upper }}">
-    <h1 id="progress-title">专题下载进度</h1>
+  {% set format_label = "Markdown" if job.output_format == "md" else job.output_format|upper %}
+  <section class="state-card" aria-labelledby="progress-title" data-progress-url="{{ status_url }}" data-job-url="{{ job_url }}" data-format="{{ format_label }}">
+    <h1 id="progress-title">{% if job.retry_position %}正在重试第 {{ job.retry_position }} 篇{% else %}专题下载进度{% endif %}</h1>
     <p class="hint source-url">{{ job.topic_url }}</p>
     <div class="progress-block">
-      <h2 id="stage-title" role="status">{% if job.progress.stage == "discovering" %}正在读取专题目录{% elif job.progress.stage == "downloading" %}正在下载文章{% else %}正在生成 {{ job.output_format|upper }}{% endif %}</h2>
+      <h2 id="stage-title" role="status">{% if job.progress.stage == "discovering" %}正在读取专题目录{% elif job.progress.stage == "downloading" %}正在下载文章{% else %}正在生成 {{ format_label }}{% endif %}</h2>
       <progress aria-label="文章处理进度" id="topic-meter" {% if job.progress.total %}value="{{ job.progress.processed }}" max="{{ job.progress.total }}"{% else %}hidden{% endif %}></progress>
       <div class="progress-stats">
         <p id="topic-counts" {% if not job.progress.total %}hidden{% endif %}><strong id="topic-count">{{ job.progress.processed }} / {{ job.progress.total }}</strong> 已处理 · <strong id="topic-failed">{{ job.progress.failed }}</strong> 失败文章</p>

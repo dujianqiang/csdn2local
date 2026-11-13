@@ -1,15 +1,30 @@
 {% extends "base.html" %}
-{% block title %}{% if success %}专题下载完成{% else %}专题下载失败{% endif %} · csdn2local{% endblock %}
+{% block title %}{% if archived %}专题详情{% elif success %}专题下载完成{% else %}专题下载失败{% endif %} · csdn2local{% endblock %}
 {% block content %}
   <section class="state-card" aria-labelledby="result-title">
-    <h1 id="result-title">{% if success %}{% if partial %}专题部分完成{% else %}专题下载完成{% endif %}{% else %}专题下载失败{% endif %}</h1>
-    {% if success %}
+    {% if archived %}<p class="hint"><a href="/topic#topic-history">专题下载记录</a> / 专题详情</p>{% endif %}
+    <h1 id="result-title">{% if archived %}{{ result.topic_title }}{% elif success %}{% if partial %}专题部分完成{% else %}专题下载完成{% endif %}{% else %}专题下载失败{% endif %}</h1>
+    {% if success and not archived %}
     <p class="result-name">{{ result.topic_title }}</p>
+    {% endif %}
+    {% if versions %}
+    <section class="result-section" aria-labelledby="versions-title">
+      <h2 id="versions-title">归档版本</h2>
+      <ul class="version-list">
+        {% for version, detail_url in versions %}
+        <li>
+          <a class="button button--quiet" href="{{ detail_url }}" {% if version.attempt.output_path == result.output_path %}aria-current="page"{% endif %}>{{ "Markdown" if version.attempt.output_format == "md" else version.attempt.output_format|upper }} · {% if version.attempt.article_limit %}前 {{ version.attempt.article_limit }} 篇{% else %}全部{% endif %}{% if "-旧版-" in version.attempt.target.archive_dir.name %} · 旧版{% endif %} · {{ version.saved_at.strftime('%Y-%m-%d %H:%M') }}</a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
     {% endif %}
     {% if progress and progress.discovered_total > progress.total %}<p class="notice">专题共 {{ progress.discovered_total }} 篇，本次只处理前 {{ progress.total }} 篇。</p>{% endif %}
     {% if success %}
-    <div class="output-links button-row"><a class="button" href="{{ output_url }}">打开专题 {{ result.output_format|upper }}</a><a href="/topic#topic-history">查看下载记录</a></div>
-    {% elif error %}
+    <div class="output-links button-row"><a class="button" href="{{ output_url }}">{% if result.output_format == "md" %}下载专题 Markdown ZIP{% else %}打开专题 {{ result.output_format|upper }}{% endif %}</a>{% if not archived %}<a href="/topic#topic-history">查看下载记录</a>{% endif %}</div>
+    {% if result.output_format == "md" %}<p class="hint">解压 ZIP 后打开 topic.md，图片从同级 assets 文件夹读取。</p>{% endif %}
+    {% endif %}
+    {% if error %}
     <p class="notice notice--error" role="alert">{{ error }}</p>
     {% endif %}
     {% if articles %}
@@ -21,11 +36,36 @@
           {% set article_title = article.title or "文章 " ~ article.position %}
           {% if output_url and result.output_format == "html" and not article.error %}
           <a class="article-result-title" href="{{ output_url }}#article-{{ article.position }}">{{ article_title }}</a>
+          {% elif output_url and result.output_format == "pdf" and not article.error %}
+          <a class="article-result-title" href="{{ output_url }}#nameddest=article-{{ article.position }}">{{ article_title }}</a>
+          {% elif output_url and not article.error %}
+          <a class="article-result-title" href="{{ output_url.split('?')[0] }}?article={{ article.position }}">{{ article_title }}</a>
           {% else %}
           <span class="article-result-title">{{ article_title }}</span>
           {% endif %}
           {% if article.error %}
-          <span class="article-result-status is-failed">{{ article.error }} <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer">打开原文</a></span>
+          <div class="article-result-status is-failed">
+            <span>{{ article.error }}</span>
+            <div class="article-actions">
+              {% if retry_base %}
+              <form action="{{ retry_base }}/{{ article.position }}" method="post" data-pending="正在提交…">
+                <button class="button--quiet" type="submit" aria-label="重试第 {{ article.position }} 篇">重试这篇</button>
+              </form>
+              {% endif %}
+              <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer">打开原文</a>
+            </div>
+            {% if retry_base and article.article_id is defined %}
+            <details class="notice">
+              <summary>导入这篇的 HTML</summary>
+              <form action="{{ retry_base }}/{{ article.position }}" method="post" enctype="multipart/form-data" data-pending="正在导入…">
+                <p class="hint">将原文另存为「网页，仅 HTML」，文件命名为 <code>{{ article.article_id }}.html</code>。</p>
+                <label for="retry-html-{{ article.position }}">文章 HTML 文件</label>
+                <input id="retry-html-{{ article.position }}" type="file" name="article_html" accept=".html,.htm" required>
+                <button class="button--quiet" type="submit">导入</button>
+              </form>
+            </details>
+            {% endif %}
+          </div>
           {% else %}
           <span class="article-result-status">{{ "已从本地 HTML 导入" if article.source == "saved_html" else "已完成" }}</span>
           {% endif %}
@@ -33,6 +73,9 @@
         {% endfor %}
       </ol>
     </section>
+    {% if archived and result.output_format == "pdf" and partial and not retry_base %}
+    <p class="hint">这个旧 PDF 缺少可合并的正文，请使用「重新下载专题」。</p>
+    {% endif %}
     {% endif %}
     {% if result and result.warnings %}
     <details class="notice"><summary>查看 {{ result.warnings|length }} 条保存提示</summary>
@@ -44,6 +87,7 @@
       <input type="hidden" name="topic_url" value="{{ topic_url }}">
       <input type="hidden" name="output_format" value="{{ output_format }}">
       <input type="hidden" name="concurrency" value="{{ concurrency }}">
+      <input type="hidden" name="article_limit" value="{{ article_limit }}">
       {% if not success or partial %}{% include "topic_html_input.html" %}{% endif %}
       <div class="button-row">
         <button class="button--quiet" type="submit">重新下载专题</button>

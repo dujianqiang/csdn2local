@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ssl
 from dataclasses import dataclass
+from http.client import IncompleteRead
 from time import sleep
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -10,7 +11,8 @@ from urllib.parse import urlsplit
 from app.config import Settings
 
 
-_PAGE_RETRY_DELAYS = (0.25, 0.5)
+_HTTP_521_RETRY_DELAYS = (0.25, 0.5)
+_DISCONNECT_RETRY_DELAYS = (2, 5)
 
 
 class FetchError(RuntimeError):
@@ -53,7 +55,7 @@ class PageFetcher:
         }
         if referer:
             headers["Referer"] = referer
-        max_attempts = len(_PAGE_RETRY_DELAYS) + 1
+        max_attempts = len(_DISCONNECT_RETRY_DELAYS) + 1
         for attempt in range(max_attempts):
             request = Request(requested_url, headers=headers)
             try:
@@ -64,31 +66,42 @@ class PageFetcher:
                     charset = response.headers.get_content_charset() or "utf-8"
                 break
             except HTTPError as exc:
+                exc.close()
                 if exc.code != 521:
                     raise FetchError(f"文章请求失败：HTTP {exc.code}") from exc
-                exc.close()
                 if exc.headers and exc.headers.get("Server", "").strip().casefold() == "waf":
                     raise FetchError("CSDN 安全防护拦截了此次请求（HTTP 521），请在浏览器中打开原网页确认。") from exc
                 if attempt == max_attempts - 1:
                     raise FetchError(f"文章请求失败：HTTP 521（已尝试 {max_attempts} 次）") from exc
-            except OSError as exc:
+                sleep(_HTTP_521_RETRY_DELAYS[attempt])
+            except (OSError, IncompleteRead) as exc:
                 reason = exc.reason if isinstance(exc, URLError) else exc
-                if not isinstance(reason, ssl.SSLError) or (
-                    not isinstance(reason, ssl.SSLEOFError)
-                    and getattr(reason, "reason", None) != "UNEXPECTED_EOF_WHILE_READING"
-                ):
+                disconnect = self._disconnect_message(reason)
+                if disconnect is None:
                     raise FetchError(f"文章请求失败：{exc}") from exc
                 if attempt == max_attempts - 1:
                     raise FetchError(
-                        f"页面请求失败：HTTPS 连接提前断开，已尝试 {max_attempts} 次。请稍后重试。"
+                        f"页面请求失败：{disconnect}，已尝试 {max_attempts} 次。请稍后重试。"
                     ) from exc
-            sleep(_PAGE_RETRY_DELAYS[attempt])
+                sleep(_DISCONNECT_RETRY_DELAYS[attempt])
 
         if status_code >= 400:
             raise FetchError(f"文章请求失败：HTTP {status_code}")
         html = raw_content.decode(charset, errors="replace")
         self.check_page_access(final_url, html)
         return PageSnapshot(requested_url=requested_url, final_url=final_url, html=html)
+
+    @staticmethod
+    def _disconnect_message(reason: object) -> str | None:
+        if isinstance(reason, IncompleteRead):
+            return "页面正文未接收完整"
+        if isinstance(reason, (ConnectionAbortedError, ConnectionResetError)):
+            return "页面连接提前断开"
+        if isinstance(reason, ssl.SSLError) and (
+            isinstance(reason, ssl.SSLEOFError) or getattr(reason, "reason", None) == "UNEXPECTED_EOF_WHILE_READING"
+        ):
+            return "HTTPS 连接提前断开"
+        return None
 
     @staticmethod
     def check_page_access(final_url: str, html: str) -> None:

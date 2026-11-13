@@ -6,8 +6,9 @@
     {% if success %}
     <p class="result-name">{{ result.metadata.title }}</p>
     <div class="button-row">
-      {% for link in links %}<a class="button {% if not loop.first %}button--quiet{% endif %}" href="{{ link.url }}">打开 {{ link.name }}</a>{% endfor %}
+      <a class="button" href="{{ output_url }}">{{ "下载 Markdown ZIP" if selected_format == "md" else "打开 " ~ selected_format|upper }}</a>
     </div>
+    {% if selected_format == "md" %}<p class="hint">解压 ZIP 后打开 article.md，图片从同级 assets 文件夹读取。</p>{% endif %}
     {% if result.warnings %}
     <details class="notice">
       <summary>查看 {{ result.warnings|length }} 条保存提示</summary>
@@ -22,7 +23,7 @@
       <a class="button" href="{{ edit_url }}">修改设置</a>
       <form action="/archive" method="post" data-pending="正在保存…">
         <input type="hidden" name="url" value="{{ url }}">
-        {% for format in formats %}<input type="hidden" name="formats" value="{{ format }}">{% endfor %}
+        <input type="hidden" name="formats" value="{{ selected_format }}">
         <button class="button--quiet" type="submit">重试</button>
       </form>
       <a href="/#library">查看下载记录</a>

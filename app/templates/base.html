@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f3f6fa">
   <title>{% block title %}csdn2local{% endblock %}</title>
   {% block extra_head %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v=7">
   <script defer src="{{ url_for('static', path='workflows.js') }}"></script>
 </head>
 <body class="site-shell {% block body_class %}{% endblock %}">
@@ -16,8 +16,8 @@
       <strong>csdn2local</strong>
     </a>
     <nav class="site-nav" aria-label="功能导航">
-      <a class="nav-link {% if not topic_active %}is-active{% endif %}" href="/" {% if not topic_active %}aria-current="page"{% endif %}>单篇下载</a>
-      <a class="nav-link {% if topic_active %}is-active{% endif %}" href="/topic" {% if topic_active %}aria-current="page"{% endif %}>专题下载</a>
+      <a class="nav-link" href="/"{% if not topic_active %} aria-current="page"{% endif %}>单篇下载</a>
+      <a class="nav-link" href="/topic"{% if topic_active %} aria-current="page"{% endif %}>专题下载</a>
     </nav>
   </header>
 

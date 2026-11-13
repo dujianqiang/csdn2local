@@ -12,6 +12,17 @@ from app.models import ArticleMetadata
 from app.storage import normalize_url
 
 
+CODE_PRINT_CSS = """
+@media print {
+  details.code-block { border: 0; overflow: visible; }
+  details.code-block > summary { display: none; }
+  details.code-block::details-content { content-visibility: visible; }
+  details.code-block > pre { border-radius: 8px; }
+  pre, pre code { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+}
+""".strip()
+
+
 @dataclass
 class ParsedArticle:
     metadata: ArticleMetadata
@@ -195,7 +206,14 @@ class ArticleParser:
         return urls
 
 
-def render_article_document(title: str, body_html: str) -> str:
+def render_source_url(source_url: str) -> str:
+    if not source_url:
+        return ""
+    url = escape(source_url)
+    return f'<p class="archive-source">原始 URL：<a href="{url}">{url}</a></p>'
+
+
+def render_article_document(title: str, body_html: str, *, source_url: str = "") -> str:
     generated_at = datetime.now(timezone.utc).isoformat()
     body_html = wrap_code_blocks(body_html)
     return f"""<!doctype html>
@@ -208,6 +226,7 @@ def render_article_document(title: str, body_html: str) -> str:
   <title>{escape(title)}</title>
   <style>
     body {{ max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; color: #222; }}
+    .archive-source {{ overflow-wrap: anywhere; }}
     img, video {{ max-width: 100%; height: auto; }}
     pre {{ overflow-x: auto; margin: 1.25rem 0; padding: 1rem 1.25rem; background: #282c34; color: #abb2bf; border: 1px solid #3b4048; border-radius: 8px; line-height: 1.6; white-space: pre; tab-size: 4; font-family: Consolas, "Cascadia Code", "Courier New", monospace; }}
     pre code {{ display: block; padding: 0; background: transparent; color: inherit; white-space: pre; font-family: inherit; }}
@@ -216,12 +235,13 @@ def render_article_document(title: str, body_html: str) -> str:
     details.code-block > summary {{ cursor: pointer; padding: .55rem 1rem; background: #21252b; color: #abb2bf; font: 600 0.9rem/1.4 Consolas, "Cascadia Code", "Courier New", monospace; user-select: none; }}
     details.code-block[open] > summary {{ border-bottom: 1px solid #3b4048; }}
     details.code-block pre {{ margin: 0; border: 0; border-radius: 0; }}
-    @media print {{ details.code-block > summary {{ display: none; }} details.code-block {{ display: block; border: 0; overflow: visible; }} details.code-block > pre {{ display: block !important; border-radius: 8px; }} }}
+    {CODE_PRINT_CSS}
   </style>
 </head>
 <body>
   <article>
     <h1>{escape(title)}</h1>
+    {render_source_url(source_url)}
     {body_html}
   </article>
 </body>

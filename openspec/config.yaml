@@ -1,9 +1,10 @@
 schema: spec-driven
 
 context: |
-  Project name: csdn 单个连接下载
-  Product scope: download one public CSDN article URL or one public CSDN topic URL to local offline publications.
-  The repository is open source and keeps one canonical specification per product capability.
+  Project name: csdn2local
+  Product scope: download public CSDN articles and columns or topics for offline use.
+  Product capabilities: csdn-single-url-download (单个网页下载), csdn-topic-download (栏目批量下载), frontend-experience (样式优化).
+  Keep one canonical specification per product capability. File format and archive layout changes belong to the affected download capabilities.
   Project documents are maintained in Chinese; implementation identifiers may remain English.
   Follow AGENTS.md. Keep all pre-release fixes and verification in the original change.
   The user confirms release readiness and owns main-spec synchronization and archiving.

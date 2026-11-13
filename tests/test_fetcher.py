@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import ssl
 from email.message import Message
+from http.client import IncompleteRead
 from unittest.mock import Mock
 from urllib.error import HTTPError, URLError
 
@@ -151,12 +152,17 @@ def test_retries_wrapped_tls_eof_when_opening_a_topic(monkeypatch, tmp_path) -> 
 
     assert snapshot.html == "<h1>Topic</h1>"
     assert [call.args[0].full_url for call in open_page.call_args_list] == [topic_url, topic_url]
-    pause.assert_called_once_with(0.25)
+    pause.assert_called_once_with(2)
 
 
-def test_retries_tls_eof_during_body_read(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("error", [
+    ssl.SSLEOFError("Unexpected EOF"),
+    IncompleteRead(b"<p>Truncated", 32),
+    ConnectionResetError("Connection reset"),
+])
+def test_retries_disconnect_during_body_read(monkeypatch, tmp_path, error) -> None:
     response = FakeResponse(b"")
-    response.read = Mock(side_effect=ssl.SSLEOFError("Unexpected EOF"))
+    response.read = Mock(side_effect=error)
     open_page = Mock(side_effect=[response, FakeResponse(b"<p>Complete article</p>")])
     monkeypatch.setattr("app.fetcher.urlopen", open_page)
     monkeypatch.setattr("app.fetcher.sleep", Mock())
@@ -179,7 +185,7 @@ def test_reports_tls_eof_after_three_attempts(monkeypatch, tmp_path) -> None:
 
     assert exc_info.value.__cause__ is error
     assert open_page.call_count == 3
-    assert [call.args[0] for call in pause.call_args_list] == [0.25, 0.5]
+    assert [call.args[0] for call in pause.call_args_list] == [2, 5]
 
 
 def test_does_not_retry_certificate_errors(monkeypatch, tmp_path) -> None:

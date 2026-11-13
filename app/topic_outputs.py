@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
-from app.parser import wrap_code_blocks
+from app.parser import CODE_PRINT_CSS, render_source_url, wrap_code_blocks
 
 
 TOPIC_CSS = """
@@ -14,6 +14,8 @@ img, video { max-width: 100%; height: auto; }
 nav.topic-navigation { padding: 1rem 1.25rem; margin-bottom: 2rem; background: #f5f7fa; border: 1px solid #d9e0e8; border-radius: 8px; }
 nav.topic-navigation ol { margin: .5rem 0 0; padding-left: 1.5rem; }
 section.topic-article { margin: 2.5rem 0; padding-top: 1rem; border-top: 2px solid #e5e7eb; }
+.archive-source { overflow-wrap: anywhere; }
+nav.topic-navigation .archive-source { margin: 0; }
 pre { overflow-x: auto; margin: 1.25rem 0; padding: 1rem 1.25rem; background: #282c34; color: #abb2bf; border: 1px solid #3b4048; border-radius: 8px; line-height: 1.6; white-space: pre; tab-size: 4; font-family: Consolas, "Cascadia Code", "Courier New", monospace; }
 pre code { display: block; padding: 0; background: transparent; color: inherit; white-space: pre; font-family: inherit; }
 pre .token.comment { color: #7f848e; }
@@ -21,11 +23,11 @@ details.code-block { margin: 1.25rem 0; background: #282c34; border: 1px solid #
 details.code-block > summary { cursor: pointer; padding: .55rem 1rem; background: #21252b; color: #abb2bf; font: 600 0.9rem/1.4 Consolas, "Cascadia Code", "Courier New", monospace; user-select: none; }
 details.code-block[open] > summary { border-bottom: 1px solid #3b4048; }
 details.code-block pre { margin: 0; border: 0; border-radius: 0; }
-@media print { nav.topic-navigation a { color: #000; text-decoration: none; } details.code-block > summary { display: none; } details.code-block { display: block; border: 0; overflow: visible; } details.code-block > pre { display: block !important; border-radius: 8px; } }
-""".strip()
+@media print { nav.topic-navigation a { color: #000; text-decoration: none; } }
+""".strip() + "\n" + CODE_PRINT_CSS
 
 
-def render_topic_document(title: str, articles: Iterable[dict[str, Any]]) -> str:
+def render_topic_document(title: str, articles: Iterable[dict[str, Any]], *, source_url: str = "") -> str:
     entries = list(articles)
     navigation: list[str] = []
     sections: list[str] = []
@@ -33,14 +35,16 @@ def render_topic_document(title: str, articles: Iterable[dict[str, Any]]) -> str
         position = int(article["position"])
         article_title = str(article.get("title") or f"文章 {position}")
         anchor = f"article-{position}"
+        source_note = render_source_url(str(article.get("url") or ""))
         error = article.get("error")
         if error:
-            navigation.append(f"<li>{escape(article_title)}（下载失败：{escape(str(error))}）</li>")
+            navigation.append(f"<li>{escape(article_title)}（下载失败：{escape(str(error))}）{source_note}</li>")
             continue
         navigation.append(f'<li><a href="#{anchor}">{escape(article_title)}</a></li>')
         sections.append(
             f'<section class="topic-article" id="{anchor}">'
             f"<h2>{escape(article_title)}</h2>"
+            f"{source_note}"
             f"{wrap_code_blocks(str(article.get('body_html') or ''))}"
             f"</section>"
         )
@@ -56,7 +60,7 @@ def render_topic_document(title: str, articles: Iterable[dict[str, Any]]) -> str
   <style>{TOPIC_CSS}</style>
 </head>
 <body>
-  <header><h1>{escape(title)}</h1></header>
+  <header><h1>{escape(title)}</h1>{render_source_url(source_url)}</header>
   <nav class="topic-navigation" aria-label="专题导航">
     <strong>专题导航</strong>
     <ol>{navigation_html}</ol>
@@ -67,13 +71,15 @@ def render_topic_document(title: str, articles: Iterable[dict[str, Any]]) -> str
 """
 
 
-def write_topic_html(path: Path, title: str, articles: Iterable[dict[str, Any]]) -> None:
-    path.write_text(render_topic_document(title, articles), encoding="utf-8")
+def write_topic_html(path: Path, title: str, articles: Iterable[dict[str, Any]], *, source_url: str = "") -> None:
+    path.write_text(render_topic_document(title, articles, source_url=source_url), encoding="utf-8")
 
 
-def write_topic_epub(path: Path, title: str, articles: Iterable[dict[str, Any]], assets: Iterable[Path]) -> None:
+def write_topic_epub(
+    path: Path, title: str, articles: Iterable[dict[str, Any]], assets: Iterable[Path], *, source_url: str = ""
+) -> None:
     entries = list(articles)
-    content = render_topic_document(title, entries).replace('href="#', 'href="content.xhtml#')
+    content = render_topic_document(title, entries, source_url=source_url).replace('href="#', 'href="content.xhtml#')
     nav_items = []
     for article in entries:
         if article.get("error"):

@@ -1,13 +1,16 @@
-# csdn 单个连接下载 OpenSpec 文档
+# csdn2local OpenSpec 需求索引
 
-本目录维护已验收的产品规格和正在推进的需求。
+初始版本包含三项需求。每项在 `changes/` 下有一份完整的提案、规格、设计和任务清单。
 
-## 当前结构
+## 三项产品需求
 
-- [单篇文章下载主规格](specs/csdn-single-url-download/spec.md)
-- [CSDN 专题下载变更与验收清单](changes/download-csdn-topic/tasks.md)
-- `changes/archive/2026-11-11-csdn-single-url-download/`：单篇下载实现历史归档目录。
-- `config.yaml`：OpenSpec 工作流和项目上下文配置。
+| 需求 | 范围 | 规格入口 |
+| --- | --- | --- |
+| 单个网页下载 | 公开 CSDN 文章的正文提取、带原文地址的离线导出、本地检索和旧归档迁移 | [规格](changes/download-single-page/specs/csdn-single-url-download/spec.md) · [任务](changes/download-single-page/tasks.md) |
+| 栏目批量下载 | 按顺序归档 CSDN 专栏或专题，保留专题和逐篇原文地址，支持进度、篇数与格式版本及逐篇补档 | [规格](changes/download-csdn-topic/specs/csdn-topic-download/spec.md) · [任务](changes/download-csdn-topic/tasks.md) |
+| 样式优化 | 统一首屏操作、状态反馈、下载记录筛选、键盘操作和窄屏布局 | [规格](changes/streamline-archive-workflows/specs/frontend-experience/spec.md) · [任务](changes/streamline-archive-workflows/tasks.md) |
+
+三个初始需求均保留在 `changes/` 等待用户验收。用户确认上线后统一同步至 `specs/` 并归档。
 
 ## 后续迭代规则
 

@@ -14,14 +14,18 @@
     <form action="/topic" method="post" enctype="multipart/form-data" data-pending="正在创建任务…">
       <div class="field">
         <label for="topic-url">CSDN 专题地址</label>
-        <input id="topic-url" name="topic_url" type="url" required value="{{ topic_url }}" placeholder="https://blog.csdn.net/…/category_….html" autocomplete="url" {% if article_limit %}aria-describedby="topic-limit"{% endif %}>
-        {% if article_limit %}<p id="topic-limit" class="hint">试下载最多保存前 {{ article_limit }} 篇。</p>{% endif %}
+        <input id="topic-url" name="topic_url" type="url" required value="{{ topic_url }}" placeholder="https://blog.csdn.net/…/category_….html" autocomplete="url">
+      </div>
+      <div class="field topic-limit">
+        <label for="article-limit">下载篇数</label>
+        <input id="article-limit" name="article_limit" type="number" min="0" step="1" value="{{ article_limit }}" required aria-describedby="topic-limit-help">
+        <p id="topic-limit-help" class="hint">填 0 下载全部，其他数字表示只下载前几篇。</p>
       </div>
       <fieldset class="choice-group">
         <legend>输出格式 <span class="hint">单选</span></legend>
         <div class="choice-grid">
-          {% for format in ("html", "epub", "pdf") %}
-          <label class="choice"><input type="radio" name="output_format" value="{{ format }}" required {% if output_format == format %}checked{% endif %}> {{ format|upper }}</label>
+          {% for format in output_formats|default(("html", "epub", "pdf")) %}
+          <label class="choice" for="topic-format-{{ format }}"><input id="topic-format-{{ format }}" type="radio" name="output_format" value="{{ format }}" required {% if output_format == format %}checked{% endif %}> {{ "Markdown" if format == "md" else format|upper }}</label>
           {% endfor %}
         </div>
       </fieldset>
@@ -38,22 +42,32 @@
   </section>
 
   <section class="library" id="topic-history" aria-labelledby="topic-history-title">
-    <div class="library-heading"><h2 id="topic-history-title">专题下载记录</h2></div>
+    <div class="library-heading">
+      <h2 id="topic-history-title">专题下载记录</h2>
+      <form class="history-filter-form" action="/topic#topic-history" method="get">
+        {% include "history_format.html" %}
+        <button class="button--quiet" type="submit">筛选</button>
+      </form>
+    </div>
     {% if history %}
     <ul class="result-list">
-      {% for record, file_url in history %}
+      {% for versions in history %}
+      {% set record, detail_url = versions[0] %}
       <li>
-        <a class="result-title" href="{{ file_url }}">{{ record.title }}</a>
-        <div class="history-meta">
-          <span>{{ record.output_format|upper }}</span>
-          {% if record.preview %}<span>试下载</span>{% endif %}
-          <time datetime="{{ record.saved_at.isoformat() }}">{{ record.saved_at.strftime('%Y-%m-%d %H:%M') }}</time>
-        </div>
+        <a class="result-title" href="{{ detail_url }}">{{ record.attempt.topic_title }}</a>
+        <ul class="topic-history-versions" role="list">
+          {% for version, version_url in versions %}
+          {% set format = version.attempt.output_format %}
+          <li>
+            <a href="{{ version_url }}">{{ "Markdown" if format == "md" else format|upper }} · {% if version.attempt.article_limit %}前 {{ version.attempt.article_limit }} 篇{% else %}全部{% endif %} · <time datetime="{{ version.saved_at.isoformat() }}">{{ version.saved_at.strftime('%m-%d %H:%M') }}</time></a>
+          </li>
+          {% endfor %}
+        </ul>
       </li>
       {% endfor %}
     </ul>
     {% else %}
-    <p class="empty-state">暂无专题下载记录。</p>
+    <p class="empty-state">{% if history_format %}没有找到匹配的专题下载记录。{% else %}暂无专题下载记录。{% endif %}</p>
     {% endif %}
   </section>
 {% endblock %}

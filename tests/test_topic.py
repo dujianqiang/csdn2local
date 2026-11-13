@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from threading import Event
 from unittest.mock import Mock
 from zipfile import ZipFile
 
 import pytest
+from bs4 import BeautifulSoup
+from pypdf import PdfReader
 
 import app.topic as topic_module
 from app.archive import ArchiveService
@@ -14,8 +17,10 @@ from app.config import Settings
 from app.fetcher import FetchError, PageSnapshot
 from app.parser import ArticleParser, ParsedArticle
 from app.models import ArticleMetadata
+from app.outputs import OutputError
 from app.resources import ResourceDownloadResult
 from app.topic import TopicFailure, TopicProgress, TopicService
+from app.topic_history import read_topic_archive
 
 
 TOPIC_URL = "https://blog.csdn.net/demo/topic"
@@ -119,6 +124,23 @@ def test_topic_download_preserves_order_and_selected_epub(tmp_path: Path) -> Non
         assert "nav" in book.read("OEBPS/package.opf").decode("utf-8")
 
 
+def test_redownloading_topic_keeps_its_folder_when_title_changes(monkeypatch, tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    url = "https://blog.csdn.net/demo/category_123.html"
+    title = "原专题"
+    monkeypatch.setattr(service, "discover", lambda *_: (title, [ARTICLE_ONE, ARTICLE_TWO]))
+    first = service.download(url, article_limit=2)
+    title = "更新后的专题"
+    updated = service.download(url, article_limit=2)
+    epub = service.download(url, "epub", article_limit=2)
+    assert updated.output_path == first.output_path
+    assert updated.output_path.relative_to(service.archive_service.settings.data_dir).as_posix() == (
+        "topics/123_原专题/前2篇/html/topic.html"
+    )
+    assert epub.output_path.parent.parent == updated.output_path.parent.parent
+    assert "更新后的专题" in updated.output_path.read_text(encoding="utf-8")
+
+
 def test_single_and_topic_share_article_preparation(monkeypatch, tmp_path: Path) -> None:
     topic_service = make_service(tmp_path)
     archive_service = topic_service.archive_service
@@ -150,6 +172,36 @@ def test_topic_download_continues_after_article_failure(tmp_path: Path) -> None:
     html = result.output_path.read_text(encoding="utf-8")
     assert html.index("文章 1") < html.index("文章 2")
     assert "下载失败" in html
+
+
+@pytest.mark.parametrize("output_format", ["html", "epub", "pdf", "md"])
+def test_topic_export_labels_the_topic_and_article_urls(tmp_path: Path, output_format: str) -> None:
+    service = make_service(tmp_path, ARTICLE_TWO)
+
+    result = service.download(TOPIC_URL, output_format)
+
+    if output_format == "pdf":
+        pages = PdfReader(result.output_path).pages
+        text = "".join("".join(page.extract_text().split()) for page in pages)
+        links = {link.get_object().get("/A", {}).get("/URI") for page in pages for link in page.get("/Annots", [])}
+        for url in (TOPIC_URL, ARTICLE_ONE, ARTICLE_TWO):
+            assert url in text
+            assert url in links
+    elif output_format == "md":
+        text = result.output_path.read_text(encoding="utf-8")
+        for url in (TOPIC_URL, ARTICLE_ONE, ARTICLE_TWO):
+            assert f"原始 URL：[{url}]({url})" in text
+        assert "下载失败：文章访问失败" in text
+    else:
+        if output_format == "epub":
+            with ZipFile(result.output_path) as book:
+                text = book.read("OEBPS/content.xhtml").decode("utf-8")
+        else:
+            text = result.output_path.read_text(encoding="utf-8")
+        document = BeautifulSoup(text, "lxml")
+        assert document.select_one("h1 + p a")["href"] == TOPIC_URL
+        assert document.select_one("#article-1 h2 + p a")["href"] == ARTICLE_ONE
+        assert document.select_one("nav li:nth-child(2) a")["href"] == ARTICLE_TWO
 
 
 def test_parallel_progress_reports_completed_articles_before_sorting(monkeypatch, tmp_path: Path) -> None:
@@ -208,6 +260,11 @@ def test_topic_preview_downloads_first_five_without_overwriting_full_export(monk
     assert metadata["article_limit"] == 5
     assert metadata["discovered_article_count"] == 6
 
+    epub = preview_service.download(TOPIC_URL, "epub", article_limit=0)
+    assert [article.url for article in epub.articles] == urls
+    assert epub.output_path.is_file()
+    assert full.output_path.read_bytes() == full_html
+
 
 def test_topic_download_generates_selected_pdf(monkeypatch, tmp_path: Path) -> None:
     service = make_service(tmp_path)
@@ -221,6 +278,77 @@ def test_topic_download_generates_selected_pdf(monkeypatch, tmp_path: Path) -> N
 
     assert result.output_path.name == "topic.pdf"
     assert result.output_path.read_bytes().startswith(b"%PDF")
+
+
+def test_topic_retry_rebuilds_pdf_from_saved_bodies_and_preserves_previous_file_on_export_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    service = make_service(tmp_path, ARTICLE_TWO)
+    fetcher = service.archive_service.fetcher
+    fetch = Mock(wraps=fetcher.fetch)
+    monkeypatch.setattr(fetcher, "fetch", fetch)
+    rendered = []
+
+    def write_pdf(html_path: Path, pdf_path: Path) -> None:
+        rendered.append(html_path.read_text(encoding="utf-8"))
+        if len(rendered) == 2:
+            raise OutputError("生成失败")
+        pdf_path.write_bytes(f"%PDF-{len(rendered)}".encode())
+
+    monkeypatch.setattr(topic_module, "write_pdf", write_pdf)
+    result = service.download(TOPIC_URL, "pdf")
+    record = read_topic_archive(result.output_path.parent)
+    assert record and record.can_retry
+    fetcher.failed = None
+    fetch.reset_mock()
+
+    with pytest.raises(TopicFailure, match="生成失败") as failed:
+        service.retry_article(record.attempt, 2, on_progress=lambda _: None)
+    assert failed.value.attempt is not None
+    assert result.output_path.read_bytes() == b"%PDF-1"
+    assert "正文 1" in rendered[0] and "正文 2" not in rendered[0]
+
+    repaired = service.retry_article(record.attempt, 2, on_progress=lambda _: None)
+    assert repaired.status == "success"
+    assert repaired.output_path.read_bytes() == b"%PDF-3"
+    assert rendered[-1].index("正文 1") < rendered[-1].index("正文 2")
+    assert [call.args[0] for call in fetch.call_args_list] == [ARTICLE_TWO, ARTICLE_TWO]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Requires Windows directory sharing rules")
+def test_topic_retry_publishes_epub_while_staged_file_is_open(monkeypatch, tmp_path: Path) -> None:
+    service = make_service(tmp_path, ARTICLE_TWO)
+    result = service.download(TOPIC_URL, "epub")
+    store = service.archive_service.store
+    legacy = store.settings.data_dir / "blog.csdn.net" / "topics" / "preview-5-epub-专题"
+    legacy.parent.mkdir(parents=True)
+    result.output_path.parent.replace(legacy)
+    (legacy / TopicService.BODY_CACHE).unlink()
+    record = read_topic_archive(legacy)
+    assert record and record.can_retry
+    service.archive_service.fetcher.failed = None
+    fetch = Mock(wraps=service.archive_service.fetcher.fetch)
+    monkeypatch.setattr(service.archive_service.fetcher, "fetch", fetch)
+    commit = store.commit
+
+    def commit_with_open_epub(staging, target):
+        with (staging.archive_dir / "topic.epub").open("rb"):
+            commit(staging, target)
+
+    monkeypatch.setattr(store, "commit", commit_with_open_epub)
+
+    repaired = service.retry_article(record.attempt, 2, on_progress=lambda _: None)
+
+    assert repaired.status == "success"
+    assert repaired.output_path == legacy / "topic.epub"
+    with ZipFile(repaired.output_path) as book:
+        content = book.read("OEBPS/content.xhtml").decode("utf-8")
+        assert content.index("正文 1") < content.index("正文 2")
+        document = BeautifulSoup(content, "lxml")
+        for position, url in enumerate((ARTICLE_ONE, ARTICLE_TWO), 1):
+            assert [link["href"] for link in document.select(f"#article-{position} a")] == [url]
+    assert [call.args[0] for call in fetch.call_args_list] == [ARTICLE_TWO]
+    assert list(store.staging_root.iterdir()) == []
 
 
 def test_topic_waits_one_second_between_completed_batches(monkeypatch, tmp_path: Path) -> None:

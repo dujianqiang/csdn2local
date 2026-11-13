@@ -1,0 +1,7 @@
+<label class="sr-only" for="history-format">文件类型</label>
+<select id="history-format" name="history_format" data-submit-on-change>
+  <option value="" {% if not history_format %}selected{% endif %}>全部类型</option>
+  {% for format in output_formats %}
+  <option value="{{ format }}" {% if format == history_format %}selected{% endif %}>{{ "Markdown" if format == "md" else format|upper }}</option>
+  {% endfor %}
+</select>

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+
+from app.config import Settings
 from app.index import ArticleIndex
 from app.models import ArticleMetadata
-from app.storage import ArchivePaths, article_key, normalize_url, sanitize_filename
+from app.storage import ArchivePaths, ArchiveStore, article_key, normalize_url, sanitize_filename
 
 
 def test_filename_and_article_key_are_windows_safe() -> None:
@@ -75,3 +81,42 @@ def test_index_lists_no_records_as_empty(tmp_path) -> None:
     index = ArticleIndex(tmp_path / "index.sqlite3")
 
     assert index.list_all() == []
+
+
+@pytest.mark.parametrize("recover_on_second_attempt", [True, False])
+def test_commit_handles_windows_publish_denial_without_losing_original(
+    monkeypatch, tmp_path, recover_on_second_attempt: bool
+) -> None:
+    store = ArchiveStore(Settings.from_project_root(tmp_path))
+    target = ArchivePaths(store.settings.data_dir / "blog.csdn.net" / "topics" / "old-epub")
+    target.archive_dir.mkdir(parents=True)
+    target.metadata.write_text("original", encoding="utf-8")
+    staging = store.create_staging()
+    staging.archive_dir.mkdir()
+    staging.metadata.write_text("repaired", encoding="utf-8")
+    replace_directory = Path.replace
+    failures = []
+
+    def replace_path(source: Path, destination: Path):
+        publishing = source == staging.archive_dir or source.name.startswith(".incoming-")
+        if destination == target.archive_dir and publishing:
+            if not recover_on_second_attempt or not failures:
+                error = PermissionError("Windows denied the directory move")
+                error.winerror = 5
+                failures.append(source)
+                raise error
+        return replace_directory(source, destination)
+
+    monkeypatch.setattr(Path, "replace", replace_path)
+    monkeypatch.setattr("app.storage.sleep", Mock())
+
+    if recover_on_second_attempt:
+        store.commit(staging, target)
+        assert target.metadata.read_text(encoding="utf-8") == "repaired"
+        assert failures == [staging.archive_dir]
+    else:
+        with pytest.raises(PermissionError, match="Windows denied"):
+            store.commit(staging, target)
+        assert target.metadata.read_text(encoding="utf-8") == "original"
+        assert any(path.parent == target.archive_dir.parent for path in failures)
+    assert list(target.archive_dir.parent.iterdir()) == [target.archive_dir]

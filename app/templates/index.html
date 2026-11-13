@@ -13,10 +13,11 @@
         <input id="url" name="url" type="url" required value="{{ url }}" placeholder="https://blog.csdn.net/…/article/details/…" autocomplete="url">
       </div>
       <fieldset class="choice-group">
-        <legend>保存格式 <span class="hint">可多选</span></legend>
+        <legend>保存格式 <span class="hint">单选</span></legend>
         <div class="choice-grid">
-          <label class="choice"><input type="checkbox" name="formats" value="html" {% if "html" in formats %}checked{% endif %}> HTML</label>
-          <label class="choice"><input type="checkbox" name="formats" value="pdf" {% if "pdf" in formats %}checked{% endif %}> PDF</label>
+          {% for format in output_formats|default(("html", "pdf")) %}
+          <label class="choice"><input type="radio" name="formats" value="{{ format }}" required {% if format == selected_format %}checked{% endif %}> {{ "Markdown" if format == "md" else format|upper }}</label>
+          {% endfor %}
         </div>
       </fieldset>
       <div class="button-row"><button type="submit">开始保存</button><span class="submit-feedback" role="status"></span></div>
@@ -26,21 +27,29 @@
   <section class="library" id="library" aria-labelledby="library-title">
     <div class="library-heading">
       <h2 id="library-title">单篇下载记录</h2>
-      <form class="search-form" action="/#library" method="get">
+      <form class="history-filter-form search-form" action="/#library" method="get">
+        {% include "history_format.html" %}
         <label class="sr-only" for="search">搜索本地文章</label>
         <input id="search" name="q" type="search" value="{{ query }}" placeholder="标题、域名、作者或标签">
         <button class="button--quiet" type="submit">搜索</button>
       </form>
     </div>
-    {% if query %}<p class="hint">搜索“{{ query }}” <a href="/#library">清除搜索</a></p>{% endif %}
+    {% if query %}<p class="hint">搜索“{{ query }}” <a href="/{% if history_format %}?history_format={{ history_format }}{% endif %}#library">清除搜索</a></p>{% endif %}
     {% if results %}
     <ul class="result-list">
       {% for item in results %}
-      <li><a class="result-title" href="{{ item.address }}">{{ item.title }}</a></li>
+      <li>
+        <a class="result-title" href="{{ item.address }}">{{ item.title }}</a>
+        <div class="history-meta">
+          {% for format, href in item.outputs.items() %}
+          <a href="{{ href }}">{{ "下载 Markdown ZIP" if format == "md" else format|upper }}</a>
+          {% endfor %}
+        </div>
+      </li>
       {% endfor %}
     </ul>
     {% else %}
-    <p class="empty-state">{% if query %}没有找到匹配的文章。{% else %}这里还没有文章。保存后可从这里打开。{% endif %}</p>
+    <p class="empty-state">{% if query or history_format %}没有找到匹配的文章。{% else %}这里还没有文章。保存后可从这里打开。{% endif %}</p>
     {% endif %}
   </section>
 {% endblock %}

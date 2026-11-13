@@ -27,7 +27,6 @@ class ResourceDownloader:
         soup = BeautifulSoup(body_html, "lxml")
         warnings: list[str] = []
         downloaded: dict[str, str] = {}
-        used_names: set[str] = set()
         with httpx.Client(
             follow_redirects=True,
             timeout=self.settings.request_timeout_seconds,
@@ -50,8 +49,9 @@ class ResourceDownloader:
                 try:
                     response = client.get(absolute)
                     response.raise_for_status()
-                    filename = self._filename(absolute, response.headers.get("content-type"), used_names)
-                    (assets_dir / filename).write_bytes(response.content)
+                    content = response.content
+                    filename = self._filename(absolute, response.headers.get("content-type"), content)
+                    (assets_dir / filename).write_bytes(content)
                     downloaded[absolute] = filename
                     node["src"] = f"assets/{filename}"
                     node.attrs.pop("data-src", None)
@@ -62,13 +62,11 @@ class ResourceDownloader:
         return ResourceDownloadResult("".join(str(child) for child in soup.contents), warnings)
 
     @staticmethod
-    def _filename(url: str, content_type: str | None, used_names: set[str]) -> str:
+    def _filename(url: str, content_type: str | None, content: bytes) -> str:
         path_name = Path(urlsplit(url).path).name
         suffix = Path(path_name).suffix
         if not suffix and content_type:
             suffix = mimetypes.guess_extension(content_type.split(";", 1)[0].strip()) or ""
-        stem = sanitize_filename(Path(path_name).stem or "asset", max_length=70, fallback="asset")
-        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:10]
-        candidate = f"{stem}-{digest}{suffix.lower()}"
-        used_names.add(candidate)
-        return candidate
+        stem = sanitize_filename(Path(path_name).stem or "asset", max_length=52, fallback="asset")
+        digest = hashlib.sha256(content).hexdigest()[:20]
+        return f"{stem}-{digest}{suffix.lower()}"

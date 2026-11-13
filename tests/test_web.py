@@ -4,11 +4,14 @@ import asyncio
 import json
 import os
 import shutil
+from io import BytesIO
 from pathlib import Path
 from threading import Event
+from zipfile import ZipFile
 
 import httpx
 import pytest
+import respx
 from bs4 import BeautifulSoup
 
 import app.main as main
@@ -20,6 +23,7 @@ from app.models import ArticleMetadata
 from app.storage import ArchivePaths
 from app.topic import TopicArticle, TopicFailure, TopicProgress, TopicResult, TopicService
 from app.topic_jobs import TopicJobs
+from app.topic_outputs import write_topic_epub
 
 
 class FakeIndex:
@@ -51,9 +55,11 @@ class FakeTopicService:
         self.started = Event()
         self.release = Event()
         self.saved_articles = None
+        self.article_limit = None
 
-    def download(self, url: str, output_format: str, concurrency: int, *, on_progress, saved_articles=None):
+    def download(self, url: str, output_format: str, concurrency: int, *, article_limit, on_progress, saved_articles=None):
         self.calls.append((url, output_format, concurrency))
+        self.article_limit = article_limit
         self.saved_articles = saved_articles
         on_progress(TopicProgress("downloading", total=2, processed=1, failed=1, discovered_total=3))
         self.started.set()
@@ -115,6 +121,58 @@ async def test_home_displays_downloaded_file_list_without_keyword(monkeypatch, t
 
 
 @pytest.mark.asyncio
+async def test_single_history_filters_available_files_and_search(monkeypatch, tmp_path: Path) -> None:
+    settings = Settings.from_project_root(tmp_path)
+    service = ArchiveService(settings)
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "archive_service", service)
+    for slug, title, formats in [
+        ("mixed", "Python 多格式", ("html", "pdf", "md")),
+        ("html", "Python 网页", ("html",)),
+        ("pdf", "Go 文档", ("pdf",)),
+    ]:
+        paths = ArchivePaths(settings.data_dir / "articles" / slug)
+        paths.archive_dir.mkdir(parents=True)
+        for fmt in formats:
+            getattr(paths, fmt).write_text(fmt, encoding="utf-8")
+        service.index.upsert(
+            ArticleMetadata(title, f"https://blog.csdn.net/demo/{slug}", "blog.csdn.net"),
+            paths,
+        )
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/", params={"q": "Python", "history_format": "pdf"})
+        page = BeautifulSoup(response.text, "lxml")
+        rows = page.select("#library li")
+        assert len(rows) == 1
+        title = rows[0].select_one(".result-title")
+        assert title.get_text(strip=True) == "Python 多格式"
+        assert title["href"].endswith("/mixed/article.pdf")
+        assert [a["href"] for a in rows[0].select(".history-meta a")] == [title["href"]]
+        assert page.select_one('#library select option[selected]')["value"] == "pdf"
+
+        cleared = await client.get(page.select_one("#library .hint a")["href"])
+        cleared_page = BeautifulSoup(cleared.text, "lxml")
+        assert {a.get_text(strip=True) for a in cleared_page.select("#library .result-title")} == {
+            "Python 多格式", "Go 文档",
+        }
+        assert cleared_page.select_one('#library select option[selected]')["value"] == "pdf"
+
+        markdown = BeautifulSoup((await client.get("/?history_format=md")).text, "lxml")
+        assert markdown.select_one("#library .result-title")["href"].endswith("/mixed/article.md?bundle=1")
+        for value in ("", "epub"):
+            all_types = BeautifulSoup((await client.get(
+                "/", params={"q": "Python", "history_format": value},
+            )).text, "lxml")
+            assert len(all_types.select("#library li")) == 2
+            assert all_types.select_one('#library select option[selected]')["value"] == ""
+
+        empty = await client.get("/", params={"q": "Go", "history_format": "html"})
+        assert "没有找到匹配的文章" in empty.text
+
+
+@pytest.mark.asyncio
 async def test_home_displays_empty_state_without_downloads(monkeypatch) -> None:
     fake = FakeService(None)
     fake.index = FakeIndex([])
@@ -171,6 +229,7 @@ async def test_single_failure_edit_restores_url_and_selected_format(monkeypatch)
         assert edit_link is not None
         form = BeautifulSoup((await client.get(edit_link["href"])).text, "lxml")
         assert form.select_one('input[name="url"]')["value"] == source
+        assert [field["value"] for field in form.select('input[name="formats"][type="radio"]')] == ["html", "pdf", "md"]
         assert [field["value"] for field in form.select('input[name="formats"][checked]')] == ["pdf"]
 
 
@@ -186,9 +245,13 @@ async def test_topic_page_has_navigation_single_format_and_default_concurrency(m
     assert "专题下载" in response.text
     assert 'name="concurrency"' in response.text
     assert 'value="1"' in response.text
-    assert 'name="output_format"' in response.text
-    assert response.text.count('name="output_format"') == 3
+    page = BeautifulSoup(response.text, "lxml")
+    assert [field["value"] for field in page.select('input[type="radio"][name="output_format"]')] == [
+        "html", "epub", "pdf", "md",
+    ]
+    assert [field["value"] for field in page.select('input[name="output_format"][checked]')] == ["html"]
     assert "暂无专题下载记录" in response.text
+    assert page.select_one('input[name="article_limit"]')["value"] == "5"
 
 
 @pytest.mark.asyncio
@@ -206,7 +269,10 @@ async def test_topic_page_opens_saved_archives_without_a_job(monkeypatch, tmp_pa
         directory = topics / name
         directory.mkdir(parents=True)
         (directory / "metadata.json").write_text(
-            json.dumps({"title": title, "format": fmt}), encoding="utf-8"
+            json.dumps({
+                "title": title, "format": fmt,
+                "original_url": "https://blog.csdn.net/demo/category_123.html",
+            }), encoding="utf-8"
         )
         if timestamp is not None:
             output = directory / f"topic.{fmt}"
@@ -223,37 +289,109 @@ async def test_topic_page_opens_saved_archives_without_a_job(monkeypatch, tmp_pa
         assert response.status_code == 200
         page = BeautifulSoup(response.text, "lxml")
         links = page.select("#topic-history a.result-title")
-        assert [link.get_text(strip=True) for link in links] == ["最新试下载", "旧版专题"]
-        assert "试下载" in links[0].parent.get_text()
-        assert "EPUB" in links[1].parent.get_text()
-        for link in links:
-            local = await client.get(link["href"])
+        assert [link.get_text(strip=True) for link in links] == ["最新试下载"]
+        listed_versions = page.select("#topic-history .result-list > li > ul > li > a")
+        assert [link.get_text().strip().split(" · ")[:2] for link in listed_versions] == [
+            ["HTML", "前 5 篇"], ["EPUB", "全部"],
+        ]
+        assert all(link.select_one("time[datetime]") for link in listed_versions)
+        detail = BeautifulSoup((await client.get(links[0]["href"])).text, "lxml")
+        versions = detail.select(".version-list a")
+        assert len(versions) == 2
+        assert "HTML · 前 5 篇" in versions[0].get_text()
+        assert "EPUB · 全部" in versions[1].get_text()
+        assert [link["href"] for link in listed_versions] == [link["href"] for link in versions]
+        for link, expected_title in zip(versions, ["最新试下载", "旧版专题"], strict=True):
+            version = BeautifulSoup((await client.get(link["href"])).text, "lxml")
+            assert version.select_one("h1").get_text(strip=True) == expected_title
+            local = await client.get(version.select_one(".output-links a")["href"])
             assert local.status_code == 200
-            assert local.content.decode("utf-8") == f"本地归档：{link.get_text(strip=True)}"
+            assert local.content.decode("utf-8") == f"本地归档：{expected_title}"
 
 
 @pytest.mark.asyncio
-async def test_topic_form_submits_single_format_and_concurrency(monkeypatch, tmp_path: Path) -> None:
-    output = tmp_path / "topic.epub"
-    output.write_bytes(b"epub")
+async def test_topic_history_filters_versions_before_sorting_groups(monkeypatch, tmp_path: Path) -> None:
+    settings = Settings.from_project_root(tmp_path)
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "topic_jobs", TopicJobs())
+    root = settings.data_dir / "blog.csdn.net" / "topics"
+    for name, topic_id, fmt, timestamp in [
+        ("第一专题网页", 1, "html", 1700000400),
+        ("第二专题 EPUB", 2, "epub", 1700000300),
+        ("第一专题 EPUB", 1, "epub", 1700000200),
+        ("preview-5-第一专题 EPUB", 1, "epub", 1700000100),
+        ("第三专题网页", 3, "html", 1700000000),
+    ]:
+        archive_dir = root / name
+        archive_dir.mkdir(parents=True)
+        (archive_dir / "metadata.json").write_text(json.dumps({
+            "title": name,
+            "format": fmt,
+            "original_url": f"https://blog.csdn.net/demo/category_{topic_id}.html",
+        }), encoding="utf-8")
+        output = archive_dir / f"topic.{fmt}"
+        output.touch()
+        os.utime(output, (timestamp, timestamp))
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        page = BeautifulSoup((await client.get("/topic?history_format=epub")).text, "lxml")
+        titles = page.select("#topic-history .result-title")
+        assert [title.get_text(strip=True) for title in titles] == ["第二专题 EPUB", "第一专题 EPUB"]
+        links = page.select("#topic-history .result-list > li > ul > li > a")
+        assert [link.get_text(" ", strip=True).split(" · ")[:2] for link in links] == [
+            ["EPUB", "全部"], ["EPUB", "全部"], ["EPUB", "前 5 篇"],
+        ]
+        assert [title["href"] for title in titles] == [links[0]["href"], links[1]["href"]]
+        assert page.select_one('#topic-history select option[selected]')["value"] == "epub"
+
+        empty = await client.get("/topic?history_format=pdf")
+        assert "没有找到匹配的专题下载记录" in empty.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_format", ["pdf", "epub", "md"])
+async def test_topic_form_submits_single_format_and_concurrency(monkeypatch, tmp_path: Path, output_format: str) -> None:
+    settings = Settings.from_project_root(tmp_path)
+    archive_dir = settings.data_dir / "topics" / "example" / "all" / output_format
+    archive_dir.mkdir(parents=True)
+    output = archive_dir / f"topic.{output_format}"
+    output.write_bytes(b"topic")
     result = TopicResult(
         status="partial",
         topic_title="测试专题",
         topic_url="https://blog.csdn.net/demo/topic",
-        output_format="epub",
+        output_format=output_format,
         output_path=output,
-        metadata_path=tmp_path / "metadata.json",
-        articles=[TopicArticle(position=1, url="https://blog.csdn.net/a", title="文章一")],
+        metadata_path=archive_dir / "metadata.json",
+        articles=[TopicArticle(position=1, url="https://blog.csdn.net/demo/article/details/1", title="文章一")],
     )
+    result.metadata_path.write_text(json.dumps({
+        "title": result.topic_title,
+        "original_url": result.topic_url,
+        "format": output_format,
+        "articles": [{"position": 1, "url": result.articles[0].url, "title": result.articles[0].title}],
+    }), encoding="utf-8")
+    (archive_dir / "assets").mkdir()
+    image = archive_dir / "assets" / "image.png"
+    image.write_bytes(b"local image")
+    body = '<p>第一篇本地正文</p><img src="assets/image.png">'
+    if output_format == "epub":
+        write_topic_epub(output, result.topic_title, [{**result.articles[0].as_dict(), "body_html": body}], [image])
+    else:
+        (archive_dir / TopicService.BODY_CACHE).write_text(json.dumps({"1": body}), encoding="utf-8")
     fake = FakeTopicService(result)
+    monkeypatch.setattr(main, "settings", settings)
     monkeypatch.setattr(main, "topic_service", fake)
     monkeypatch.setattr(main, "topic_jobs", TopicJobs())
-    monkeypatch.setattr(main, "_file_url", lambda path: "/files/topic.epub")
-    form = {"topic_url": result.topic_url, "output_format": "epub", "concurrency": "3"}
+    form = {"topic_url": result.topic_url, "output_format": output_format, "concurrency": "3", "article_limit": "0"}
 
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         try:
+            invalid = await client.post("/topic", data={**form, "output_format": ["html", output_format]})
+            assert invalid.status_code == 400
+            assert not fake.calls
             submission = await client.post("/topic", data=form)
             assert submission.status_code == 303
             job_url = submission.headers["location"]
@@ -284,19 +422,38 @@ async def test_topic_form_submits_single_format_and_concurrency(monkeypatch, tmp
         assert edit_link is not None
         edited = BeautifulSoup((await client.get(edit_link["href"])).text, "lxml")
         assert edited.select_one('input[name="topic_url"]')["value"] == result.topic_url
-        assert edited.select_one('input[name="output_format"][checked]')["value"] == "epub"
+        assert edited.select_one('input[name="output_format"][checked]')["value"] == output_format
         assert edited.select_one('input[name="concurrency"]')["value"] == "3"
+        assert edited.select_one('input[name="article_limit"]')["value"] == "0"
+        history = await client.get(f"/topic/history/topics/example/all/{output_format}")
+        assert history.status_code == 200
+        file_url = f"/files/topics/example/all/{output_format}/topic.{output_format}"
+        expected_title_url = file_url + ("#nameddest=article-1" if output_format == "pdf" else "?article=1")
+        for document in (page, BeautifulSoup(history.text, "lxml")):
+            title = document.select_one("a.article-result-title")
+            assert title is not None
+            assert title["href"] == expected_title_url
+        local = await client.get(expected_title_url)
+        assert local.status_code == 200
+        if output_format != "pdf":
+            article = BeautifulSoup(local.text, "lxml").select_one("article")
+            assert article.h1.get_text() == "文章一"
+            assert "第一篇本地正文" in article.get_text()
+            assert article.img["src"] == "assets/image.png"
+            assert (await client.get(file_url.rsplit("/", 1)[0] + "/assets/image.png")).content == b"local image"
+            assert (await client.get(file_url, params={"article": 99})).status_code == 404
 
     assert response.status_code == 200
     assert "测试专题" in response.text
-    assert "/files/topic.epub" in response.text
-    assert not BeautifulSoup(response.text, "lxml").select("a.article-result-title")
+    assert f"/files/topics/example/all/{output_format}/topic.{output_format}" in response.text
     assert "重新下载专题" in response.text
-    assert 'name="output_format" value="epub"' in response.text
+    assert f'name="output_format" value="{output_format}"' in response.text
     assert 'name="concurrency" value="3"' in response.text
+    assert 'name="article_limit" value="0"' in response.text
     assert "专题共 3 篇，本次只处理前 2 篇" in response.text
     assert 'http-equiv="refresh"' not in response.text
-    assert fake.calls == [(result.topic_url, "epub", 3)]
+    assert fake.calls == [(result.topic_url, output_format, 3)]
+    assert fake.article_limit == 0
 
 
 @pytest.mark.asyncio
@@ -407,7 +564,8 @@ async def test_topic_retry_form_imports_saved_articles_and_serves_ordered_html(m
         topic_home = await client.get("/topic")
         saved_link = BeautifulSoup(topic_home.text, "lxml").select_one("#topic-history a.result-title")
         assert saved_link is not None
-        assert saved_link["href"] == output_link["href"]
+        detail = BeautifulSoup((await client.get(saved_link["href"])).text, "lxml")
+        assert detail.select_one(".output-links a")["href"] == output_link["href"]
 
     assert output.status_code == 200
     output_page = BeautifulSoup(output.text, "lxml")
@@ -418,6 +576,204 @@ async def test_topic_retry_form_imports_saved_articles_and_serves_ordered_html(m
         assert expected_text in section.get_text()
     assert output.text.index("第一篇正文") < output.text.index("第二篇正文")
     assert requests == [topic_url, article_one, article_two, topic_url]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("all_failed", [False, True])
+async def test_topic_retry_fetches_only_the_selected_article(monkeypatch, tmp_path: Path, all_failed: bool) -> None:
+    url = "https://blog.csdn.net/demo/category_123.html"
+    first = "https://blog.csdn.net/demo/article/details/11"
+    second = "https://blog.csdn.net/demo/article/details/22"
+    settings = Settings.from_project_root(tmp_path)
+    service = TopicService(ArchiveService(settings))
+    fetched = []
+    unavailable = {first, second} if all_failed else {second}
+
+    def fetch(source, *, referer=None):
+        fetched.append(source)
+        if source in unavailable:
+            raise FetchError("暂时无法下载")
+        if source == url:
+            html = (
+                '<div id="column"><ul class="column_article_list">'
+                f'<li><a href="{first}">第一篇</a></li><li><a href="{second}">第二篇</a></li></ul></div>'
+            )
+        else:
+            title = "第一篇" if source == first else "第二篇"
+            html = f'<title>{title}</title><div id="content_views">{f"{title}正文。" * 10}</div>'
+        return PageSnapshot(source, source, html)
+
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "topic_service", service)
+    monkeypatch.setattr(main, "topic_jobs", TopicJobs())
+    monkeypatch.setattr(service.archive_service.fetcher, "fetch", fetch)
+    monkeypatch.setattr(topic_module, "sleep", lambda _: None)
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        invalid = await client.post("/topic", data={"topic_url": url, "article_limit": "-1"})
+        assert invalid.status_code == 400
+        assert fetched == []
+        submission = await client.post("/topic", data={"topic_url": url, "article_limit": "0"})
+        initial = await wait_for_topic_result(client, submission.headers["location"])
+        if not all_failed:
+            # An older HTML archive can be retried after the process loses its in-memory jobs.
+            (next((settings.data_dir / "topics").glob("*/*/*/metadata.json")).parent / TopicService.BODY_CACHE).unlink()
+            monkeypatch.setattr(main, "topic_jobs", TopicJobs())
+            listing = BeautifulSoup((await client.get("/topic")).text, "lxml")
+            initial = await client.get(listing.select_one("#topic-history a.result-title")["href"])
+        page = BeautifulSoup(initial.text, "lxml")
+        retry_form = page.select_one('form[action$="/retry/2"]')
+        assert retry_form is not None
+        previous_output = page.select_one(".output-links a")
+        if previous_output:
+            previous_bytes = (await client.get(previous_output["href"])).content
+
+        retry = await client.post(retry_form["action"])
+        assert retry.status_code == 303
+        still_failed = await wait_for_topic_result(client, retry.headers["location"])
+        assert "暂时无法下载" in still_failed.text
+        if previous_output:
+            assert (await client.get(previous_output["href"])).content == previous_bytes
+
+        unavailable.remove(second)
+        retry_page = BeautifulSoup(still_failed.text, "lxml")
+        retry = await client.post(retry_page.select_one('form[action$="/retry/2"]')["action"])
+        updated = await wait_for_topic_result(client, retry.headers["location"])
+        result = BeautifulSoup(updated.text, "lxml")
+        assert result.select_one('form[action$="/retry/2"]') is None
+        output = await client.get(result.select_one(".output-links a")["href"])
+        saved = BeautifulSoup(output.text, "lxml")
+        assert saved.select_one("#article-2").h2.get_text() == "第二篇"
+        assert (saved.select_one("#article-1") is None) == all_failed
+        if not all_failed:
+            assert "第一篇正文" in saved.select_one("#article-1").get_text()
+
+    assert fetched == [url, first, second, second, second]
+
+
+@pytest.mark.asyncio
+async def test_markdown_downloads_and_imports_one_failed_article(monkeypatch, tmp_path: Path) -> None:
+    topic = "https://blog.csdn.net/demo/category_123.html"
+    first = "https://blog.csdn.net/demo/article/details/11"
+    second = "https://blog.csdn.net/demo/article/details/22"
+    settings = Settings.from_project_root(tmp_path)
+    service = ArchiveService(settings)
+    fetched = []
+    article_html = (
+        '<title>示例文章</title><div id="content_views"><h2>示例</h2>'
+        '<p>这一段保留在单篇和专题的 Markdown 中，用于验证正文不会在补档时丢失。</p>'
+        '<pre class="language-go"><code>if a &lt; b {\n\t// ```\n}</code></pre>'
+        '<ul><li>第一项</li></ul><img src="https://img.csdn.net/example.png" alt="示意图">'
+        '<table><tr><th>名称</th><th>值</th></tr><tr><td>样例</td><td>42</td></tr></table></div>'
+    )
+
+    def fetch(source, *, referer=None):
+        fetched.append(source)
+        if source == second:
+            raise FetchError("HTTPS 连接提前断开")
+        html = (
+            '<div id="column"><ul class="column_article_list">'
+            f'<li><a href="{first}">第一篇</a></li><li><a href="{second}">第二篇</a></li></ul></div>'
+            if source == topic else article_html
+        )
+        return PageSnapshot(source, source, html)
+
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "archive_service", service)
+    monkeypatch.setattr(main, "topic_service", TopicService(service))
+    monkeypatch.setattr(main, "topic_jobs", TopicJobs())
+    monkeypatch.setattr(service.fetcher, "fetch", fetch)
+    monkeypatch.setattr(topic_module, "sleep", lambda _: None)
+    with respx.mock as assets:
+        image = assets.get("https://img.csdn.net/example.png").respond(200, content=b"image")
+        transport = httpx.ASGITransport(app=main.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            single = BeautifulSoup((await client.post("/archive", data={"url": first, "formats": "md"})).text, "lxml")
+            single_link = single.select_one('a[href$="/article.md?bundle=1"]')
+            assert single_link is not None
+            assert single_link.get_text() == "下载 Markdown ZIP"
+            single_url = single_link["href"]
+            document = await client.get(single_url.split("?", 1)[0])
+            original_markdown = document.content
+            assert document.headers["content-disposition"] == 'attachment; filename="article.md"'
+            assert f"原始 URL：[{first}]({first})" in document.text
+            assert "````go\nif a < b {\n\t// ```\n}\n````" in document.text
+            assert "| 名称 | 值 |" in document.text
+            assert "第一项" in document.text
+            assert "![示意图](assets/example-" in document.text
+            assert service.index.search("示例文章")[0]["address"].endswith("article.md")
+            single_download = await client.get(single_url)
+            assert single_download.headers["content-type"] == "application/zip"
+            assert single_download.headers["content-disposition"] == 'attachment; filename="article.zip"'
+            single_asset = document.text.split("![示意图](", 1)[1].split(")", 1)[0]
+            with ZipFile(BytesIO(single_download.content)) as bundle:
+                assert set(bundle.namelist()) == {"article.md", single_asset}
+                assert bundle.read("article.md") == document.content
+                assert bundle.read(single_asset) == b"image"
+            library = BeautifulSoup((await client.get("/")).text, "lxml")
+            assert library.select_one("#library a.result-title")["href"] == single_url
+
+            submit = await client.post("/topic", data={"topic_url": topic, "output_format": "md"})
+            initial = BeautifulSoup((await wait_for_topic_result(client, submit.headers["location"])).text, "lxml")
+            topic_bundle_url = initial.select_one(".output-links a")["href"]
+            assert topic_bundle_url.endswith("/topic.md?bundle=1")
+            link = topic_bundle_url.split("?", 1)[0]
+            partial = await client.get(link)
+            assert partial.headers["content-disposition"] == 'attachment; filename="topic.md"'
+            assert "![示意图](assets/article-1-example-" in partial.text
+            assert f"原始 URL：[{second}]({second})" in partial.text
+            assert "HTTPS 连接提前断开" in partial.text
+
+            history = BeautifulSoup((await client.get("/topic")).text, "lxml")
+            detail_url = history.select_one("#topic-history a.result-title")["href"]
+            detail = BeautifulSoup((await client.get(detail_url)).text, "lxml")
+            assert detail.select_one(".output-links a")["href"] == topic_bundle_url
+            form = detail.select_one('form[action$="/retry/2"][enctype="multipart/form-data"]')
+            imported = '<title>补档文章</title><div id="content_views"><p>从本地恢复的正文</p></div>'
+            invalid = await client.post(form["action"], files={"article_html": ("11.html", imported)})
+            assert invalid.status_code == 400
+            assert (await client.get(link)).content == partial.content
+            retry = await client.post(form["action"], files={"article_html": ("22.html", imported)})
+            updated = await wait_for_topic_result(client, retry.headers["location"])
+            assert "已从本地 HTML 导入" in updated.text
+            document = await client.get(link)
+            assert "HTTPS 连接提前断开" not in document.text
+            assert "从本地恢复的正文" in document.text
+            for source in (topic, first, second):
+                label = source.replace("_", r"\_")
+                assert document.text.count(f"原始 URL：[{label}]({source})") == 1
+            assert document.text.index("## 示例文章") < document.text.index("## 补档文章")
+            assert "![示意图](assets/article-1-example-" in document.text
+            asset = document.text.split("![示意图](", 1)[1].split(")", 1)[0]
+            assert (await client.get(link.rsplit("/", 1)[0] + "/" + asset)).content == b"image"
+            topic_download = await client.get(topic_bundle_url)
+            assert topic_download.headers["content-disposition"] == 'attachment; filename="topic.zip"'
+            with ZipFile(BytesIO(topic_download.content)) as bundle:
+                assert set(bundle.namelist()) == {"topic.md", asset}
+                assert bundle.read("topic.md") == document.content
+                assert bundle.read(asset) == b"image"
+
+            mixed = await client.post("/archive", data={"url": first, "formats": ["html", "md"]})
+            assert mixed.status_code == 400
+            image.respond(200, content=b"updated image")
+            html = await client.post("/archive", data={"url": first, "formats": "html"})
+            assert html.status_code == 200
+            assert "Markdown ZIP" not in html.text
+            library = BeautifulSoup((await client.get("/", params={"q": "示例文章"})).text, "lxml")
+            saved = library.select_one("#library li")
+            assert saved.select_one("a.result-title")["href"].endswith("/article.html")
+            assert saved.select_one('.history-meta a[href$="/article.html"]').get_text() == "HTML"
+            assert saved.select_one('a[href$="/article.md?bundle=1"]').get_text() == "下载 Markdown ZIP"
+            html_output = await client.get(saved.select_one("a.result-title")["href"])
+            new_asset = BeautifulSoup(html_output.text, "lxml").select_one("img")["src"]
+            assert new_asset != single_asset
+            assert (await client.get(html_output.url.join(new_asset))).content == b"updated image"
+            retained = await client.get(single_url)
+            with ZipFile(BytesIO(retained.content)) as bundle:
+                assert bundle.read("article.md") == original_markdown
+                assert bundle.read(single_asset) == b"image"
+    assert fetched == [first, topic, first, second, first]
 
 
 async def wait_for_topic_result(client: httpx.AsyncClient, job_url: str) -> httpx.Response:

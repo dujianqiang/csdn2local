@@ -1,5 +1,9 @@
 "use strict";
 
+for (const select of document.querySelectorAll("select[data-submit-on-change]")) {
+  select.addEventListener("change", () => select.form.requestSubmit());
+}
+
 for (const form of document.querySelectorAll("form[data-pending]")) {
   const button = form.querySelector('button[type="submit"]');
   const feedback = form.querySelector(".submit-feedback");

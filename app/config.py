@@ -34,7 +34,7 @@ class Settings:
         return cls(
             project_root=root,
             data_dir=data_dir,
-            index_path=data_dir / "index.sqlite3",
+            index_path=data_dir / ".internal" / "index.sqlite3",
             topic_article_limit=limit,
             user_agent=os.getenv("CSDN2LOCAL_USER_AGENT", DEFAULT_USER_AGENT).strip() or DEFAULT_USER_AGENT,
         )

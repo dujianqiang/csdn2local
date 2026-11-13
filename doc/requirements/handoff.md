@@ -1,103 +1,37 @@
-# csdn 单个连接下载：项目需求交接记录
+# csdn2local 1.0 交接
 
-更新时间：2026-11-12
-
-## 项目目标
-
-将 CSDN 文章保存为本地文件，降低网站停止运营或内容下线导致文章无法访问的风险，并为后续上传到其他存储或平台提供基础。
+更新于 2026-11-13。
 
 ## 当前状态
 
-- 第一阶段核心功能已实现并推送到 GitHub。
-- 当前分支：`dev`，本地仍有尚未推送到 `origin/dev` 的整理提交。
-- 第一阶段所有实现和补充修复已合并回同一个初始 OpenSpec 需求，补丁型变更已归档。
-- 专题下载仍在验收中，相关修复和复测记录集中在 [专题下载任务清单](../../openspec/changes/download-csdn-topic/tasks.md)。本次针对 CSDN 521 的修复已加入现代浏览器导航头、可配置 User-Agent 和专题 Referer；用户确认达到可上线状态后统一同步主规格和归档。
+csdn2local 是本地运行的 FastAPI Web 工具，将公开 CSDN 文章和专题保存为离线文件。1.0 的安装、启动、PDF 配置和操作步骤见 [项目 README](../../README.md)。
 
-## 已确认的第一阶段需求
+- **单篇下载**支持 HTML、PDF、Markdown，每次保存一种格式。归档位于 `data/articles/`，下载记录可按关键词和格式筛选。
+- **专题下载**支持 HTML、EPUB、PDF、Markdown。默认处理前 5 篇，填 `0` 处理全部已识别文章。任务在后台执行，按原目录顺序导出，可逐篇重试或导入浏览器另存的 HTML。归档位于 `data/topics/`，按篇数和格式保留不同版本。
+- 工作区位于 `dev`，基线提交为 `59e48e4`，另有已修改、已删除和未跟踪文件。相对本地记录的 `origin/dev`，`dev` 领先 11 个提交、落后 1 个提交。接手时以当前工作区和 `git status --short --branch` 为准。
+- README 使用产品版本 1.0，`pyproject.toml` 的 Python 包版本目前为 `0.1.0`。如需发布 Python 包，先确认版本号。
 
-- 以 Web 服务形式提供功能。
-- 支持输入单个 CSDN 公开文章 URL。
-- 提交 URL 后同步下载，等待处理完成后返回结果。
-- 保存格式由用户选择：HTML、PDF，或 HTML 和 PDF 两种；至少选择一种。
-- 用户未特别指定时，默认保存 HTML。
-- 所有文件保存到项目根目录下的 `data/` 目录。
-- 按 URL 域名创建来源目录，例如 `data/blog.csdn.net/`。
-- 文章目录使用“文章 ID + 清理后的标题”命名。
-- 正文资源保存到文章目录的 `assets/` 中，HTML 使用相对路径引用。
-- 只下载 CSDN 正文，不下载评论、广告、推荐内容、侧边栏等非正文内容。
-- 保存正文文本、正文图片、代码和必要的排版信息。
-- 保存标题、作者、发布时间、标签、原始 URL、保存时间等元数据。
-- 同一 URL 重复保存时覆盖已有文件，只保留最新版本。
-- 下载失败时显示具体原因，并提供重新下载功能。
-- 单个图片或正文资源下载失败时，不导致整篇文章失败；保留已生成文件并提示缺失资源。
-- HTML 和 PDF 同时选择时，其中一种格式失败不影响另一种格式保存。
-- 第一阶段只支持无需登录即可访问的公开文章，不处理登录文章和付费文章。
-- 第一阶段不设置额外的访问频率限制。
-- 首页提供已下载文件列表，并提供一个本地文章检索入口。
-- 搜索使用一个关键词输入框，对标题、域名、原始 URL、作者和标签进行模糊匹配。
-- 搜索结果只显示文章标题和地址：有 HTML 时指向本地 HTML，没有 HTML 时指向本地 PDF。
-- 首期不做正文全文搜索。
-- 第一阶段只保存本地文件，不接入外部上传平台。
+## 开发入口
 
-## 已实现功能
+- [app/main.py](../../app/main.py) 提供单篇、专题、进度和文件访问路由。
+- [app/archive.py](../../app/archive.py) 负责单篇下载，[app/topic.py](../../app/topic.py) 和 [app/topic_jobs.py](../../app/topic_jobs.py) 负责专题下载和任务状态。
+- [app/storage.py](../../app/storage.py) 管理归档目录，[app/index.py](../../app/index.py) 管理单篇归档的 SQLite 搜索索引。
+- 安装开发依赖、运行测试和校验规格见 [本地开发说明](../development.md)。
 
-- Python FastAPI 单体 Web 服务。
-- 单个 CSDN 公开文章 URL 同步下载。
-- 默认保存 HTML，可选 PDF 或 HTML+PDF。
-- 正文提取和非正文区域清理。
-- 保留代码块、代码注释、换行、缩进和 ASCII/Unicode 边框字符。
-- 离线 HTML 使用深色代码块样式、等宽字体和横向滚动。
-- 每个代码块默认收起，并支持点击标题折叠/展开；打印/PDF 时保持代码可见。
-- 图片等正文资源保存到 `assets/`，HTML 使用相对路径。
-- 文章元数据写入 `metadata.json`，搜索索引使用 SQLite。
-- 重复 URL 覆盖旧归档，只保留最新版本。
-- 支持部分成功、失败原因提示和重新下载。
-- 公开 CSDN 页面使用兼容性更好的标准库 HTTPS 抓取方式。
-- 搜索页面按标题、域名、URL、作者和标签模糊匹配，并优先打开本地 HTML，缺少 HTML 时回退到 PDF。
-- 首页显示已下载文件列表，按最近保存时间倒序排列；未搜索时显示全部记录，搜索时显示匹配记录。
-- 没有已下载文件时显示明确的空状态提示。
-- 支持输入 CSDN 专题地址，按专题顺序批量下载文章。
-- 专题下载支持可配置并行数量，默认值为 1；结果导航和输出顺序保持不变。
-- 专题输出格式为 HTML、EPUB 或 PDF 三选一，三种输出均包含专题导航。
-- 前端提供“单个地址下载”和“专题下载”两个功能页面并可切换。
-- 专题请求使用 `CSDN2LOCAL_USER_AGENT` 可覆盖的现代 Chrome User-Agent，并在专题文章请求中携带专题页 Referer。
-- 使用用户提供的专题实测识别到 30 篇，按试下载上限处理前 5 篇，5 篇全部成功生成 HTML；自动化测试 46 项通过。
+## 验证结果
 
-用户提供的文章已经保存到：
+| 环境 | 结果 |
+| --- | --- |
+| Windows | `python -m pytest -q` 全部 73 项通过。 |
+| Ubuntu 24.04（WSL） | 隔离目录中安装并启动成功，健康检查正常，首页和专题页返回 HTTP 200。装入 Playwright 对应的 Chromium Headless Shell 后，72 项测试通过，1 项 Windows 专属测试跳过。Linux 系统依赖的一键安装命令仍待在干净环境复测。 |
+| macOS | 已记录安装、启动和 PDF 配置步骤，待实机验证。 |
+| OpenSpec | `openspec validate --all --strict --no-interactive` 校验通过，共 3 项变更。 |
 
-```text
-data/blog.csdn.net/<article-id>_<sanitized-title>/article.html
-```
+## 接手后的验收
 
-`data/`、`.venv/`、Playwright 浏览器运行时等本地运行文件已加入 `.gitignore`。
+1. **单篇下载**。用真实公开文章 `148010754` 复测在线抓取、PDF 和归档内的原文链接。上次实测返回 HTTP 521。完整验收项见 [单篇下载任务](../../openspec/changes/download-single-page/tasks.md)。
+2. **专题下载**。用真实栏目 `12978516` 复测试下载、全量下载、目录与文章顺序、原文链接、Markdown 和逐篇补档。上次识别到 30 篇，首篇 `148028338` 的 HTTPS 连接提前断开。完整验收项见 [专题下载任务](../../openspec/changes/download-csdn-topic/tasks.md)。
+3. **界面**。复测窄屏布局、进度反馈，以及用实际归档按文件类型筛选。完整验收项见 [界面优化任务](../../openspec/changes/streamline-archive-workflows/tasks.md)。
+4. **跨平台**。在 macOS 实机验证启动和 PDF 导出，在干净的 Linux 环境复测 README 中的 Chromium 系统依赖安装命令。
 
-## 相关文档
-
-- 需求概述：[project-overview.md](./project-overview.md)
-- 本地开发说明：[../development.md](../development.md)
-- 项目协作规范：[../../AGENTS.md](../../AGENTS.md)
-- OpenSpec 主规格：[../../openspec/specs/](../../openspec/specs/)
-- OpenSpec 历史归档：[../../openspec/changes/archive/](../../openspec/changes/archive/)
-
-## 后续迭代建议
-
-- 将正文资源下载也切换到兼容 HTTPS 传输，降低图片资源出现 TLS 错误的概率。
-- 增加更多 CSDN 页面结构样本，持续完善正文识别和非正文清理规则。
-- 优化 HTML/PDF 的代码语法高亮和行号显示。
-- 明确版权提示、文章使用边界和本地工具的免责声明。
-- 后续再考虑批量导入、正文全文搜索和外部存储上传。
-- 专题下载已作为独立 OpenSpec 变更实现，当前仍需用户验收进度页、文章顺序、导航和单选导出；上线前还需解除默认 5 篇试下载限制。
-
-## 下一步
-
-后续任何功能或问题修复都要先按 OpenSpec 创建或更新变更工件，再进入实现、测试、提交和推送流程。
-
-本地启动命令：
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-浏览器访问：`http://127.0.0.1:8000`
-
-最近一次完整验证：27 个测试通过，OpenSpec 主规格校验通过。
+验收中发现的问题先更新对应的 OpenSpec 变更，再实现、测试并记录结果。三项变更留在 `openspec/changes/`，由用户在验收通过后确认上线，再统一同步主规格并归档。参见 [项目协作规范](../../AGENTS.md) 和 [OpenSpec 需求索引](../../openspec/README.md)。

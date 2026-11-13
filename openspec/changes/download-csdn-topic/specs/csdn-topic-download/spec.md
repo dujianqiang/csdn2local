@@ -1,12 +1,12 @@
 ## Purpose
 
-为 CSDN 专题提供一次提交、批量归档和统一阅读的能力，保留专题文章原始顺序，并生成带导航的单一离线输出文件。
+栏目批量下载支持从一个公开的 CSDN 专栏或专题地址归档多篇文章，保留原始顺序，并生成带目录的离线文件。下载进度、已保存版本和失败文章的处理结果可在网页查看。
 
 ## ADDED Requirements
 
 ### Requirement: Download a CSDN topic as an ordered offline publication
 
-系统 SHALL 接受一个公开可访问的 CSDN 专题地址，识别其中的文章地址并按照专题页面提供的顺序批量下载。系统 SHALL 允许用户配置专题文章下载的并行数量，默认值为 1；无论并行数量如何设置，导航和最终输出都必须保持专题原始顺序。系统 SHALL 允许用户选择一种专题输出：单一 HTML、单一电子书或单一 PDF 电子书；每种输出都必须包含可跳转到专题文章的导航。
+系统 SHALL 接受一个公开可访问的 CSDN 专栏或专题地址，识别其中的文章并按原始顺序生成离线内容。系统 SHALL 支持配置下载篇数和并行数量，并允许每次选择一种带目录的输出格式，包括 HTML、EPUB、PDF 和 Markdown。
 
 #### Scenario: Submit a public topic URL
 
@@ -58,6 +58,21 @@
 - **WHEN** 用户为专题中的文章提供浏览器另存的 HTML
 - **THEN** 系统按文章 ID 匹配文件，复用正文和资源处理流程，并把文章合并到专题的原始位置
 
+#### Scenario: Recover from a transient page disconnect
+
+- **WHEN** 专题目录或文章请求出现 TLS EOF、连接重置或正文未完整接收
+- **THEN** 系统在递增等待后重新请求，次数耗尽时保留具体失败原因和逐篇恢复入口
+
+#### Scenario: Import saved HTML for one failed article
+
+- **WHEN** 用户在失败行提交与该文章匹配的浏览器另存 HTML
+- **THEN** 系统只处理所选文章，并使用已归档的正文重建同一专题产物
+
+#### Scenario: Publish a repaired topic when Windows prevents moving the staging directory
+
+- **WHEN** 重试已生成完整产物，且 Windows 拒绝移动可读取的暂存目录
+- **THEN** 系统重试目录替换，必要时使用完整副本发布到原归档路径；发布失败时保护原归档及其备份
+
 #### Scenario: Generate one HTML topic publication
 
 - **WHEN** 用户选择 HTML 作为专题输出格式
@@ -65,13 +80,28 @@
 
 #### Scenario: Open an archived article from the topic result page
 
-- **WHEN** HTML 专题结果页中有成功归档的文章
-- **THEN** 点击文章标题直接打开专题 HTML 并跳转到对应正文。失败文章保留失败状态和原文链接
+- **WHEN** 专题结果页或历史详情中有成功归档的文章
+- **THEN** 点击成功归档的文章标题打开对应的本地正文。HTML 和 PDF 跳转到专题文件中的文章位置，EPUB 和 Markdown 使用本地阅读视图。失败文章保留失败状态和原文链接
 
 #### Scenario: Open a previously downloaded topic
 
 - **WHEN** 用户进入专题下载页，且本地存在可用的专题归档
-- **THEN** 页面按保存时间从新到旧展示归档标题、格式和时间，并标明试下载产物。点击记录直接打开本地输出，服务重启后仍可访问
+- **THEN** 页面按最新匹配版本的保存时间展示专题，同一专题合并为一项，在标题下显示各个匹配版本的格式和篇数范围。点击可进入对应版本的详情、查看逐篇状态并打开本地输出，服务重启后仍可访问
+
+#### Scenario: Set the number of articles to download
+
+- **WHEN** 用户新建或编辑专题任务
+- **THEN** 下载篇数可输入非负整数，默认 5，填 0 处理完整专题。提交、修改和重试保留所选值
+
+#### Scenario: Keep exports in different formats
+
+- **WHEN** 用户切换格式重新下载同一专题
+- **THEN** 新归档按选中的格式生成，已有其他格式仍在专题下载记录中可见并可打开
+
+#### Scenario: Retry one failed article
+
+- **WHEN** 用户在任务结果或可重建的归档详情中重试一篇失败文章
+- **THEN** 系统仅重新处理该文章。成功后按原顺序合并并更新输出，失败时可再次重试且先前可用输出仍可打开
 
 #### Scenario: Show an empty topic history
 
@@ -87,6 +117,11 @@
 
 - **WHEN** 用户选择 PDF 电子书作为专题输出格式
 - **THEN** 系统生成一个 PDF 文件，PDF 中包含专题导航或目录，并按专题顺序包含文章内容
+
+#### Scenario: 生成或补齐 Markdown 专题
+
+- **WHEN** 用户选择 Markdown 格式下载专题
+- **THEN** 系统生成一个 UTF-8 的 `topic.md`，按专题顺序保留目录、成功文章和失败原因。结果页和历史记录提供包含 `topic.md` 与同级 `assets/` 资源的 ZIP，解压后可离线显示已归档的图片。部分成功时可在历史记录逐篇补齐并下载更新后的 ZIP
 
 #### Scenario: Navigate between topic articles
 
@@ -107,3 +142,36 @@
 
 - **WHEN** 文章在带导航上下文的请求下仍被 CSDN 安全防护拦截
 - **THEN** 系统保留该文章的原始顺序和失败原因，结果页提供打开原文及上传浏览器另存 HTML 的补救入口，不把失败文章误报为成功
+
+### Requirement: 专题归档按篇数和格式存放
+
+系统 SHALL 在 `data/topics/` 下为同一专题复用归档目录，按下载篇数和格式保存各个版本。
+
+#### Scenario: 保存专题版本
+
+- **WHEN** 用户再次成功保存相同篇数及格式的专题
+- **THEN** 系统更新对应版本的产物、元数据和资源，保留其他篇数或格式版本
+
+#### Scenario: 专题标题发生变化
+
+- **WHEN** 同一专题以新标题重新下载
+- **THEN** 继续使用原专题目录，网页展示最新保存的标题
+
+#### Scenario: 迁移同一规格的多份旧归档
+
+- **WHEN** 迁移发现同一专题、同一篇数、同一格式的多个旧目录
+- **THEN** 系统保留每一份。有新布局版本时保留当前版本，否则最近保存的旧归档成为当前版本，其余在详情中可打开
+
+### Requirement: 专题下载文件标注原始 URL
+
+系统 SHALL 在新生成的专题 HTML、PDF、EPUB 和 Markdown 正文中显示可点击的专题和文章来源地址。
+
+#### Scenario: 查看专题文件的来源
+
+- **WHEN** 用户打开新生成的专题文件
+- **THEN** 专题标题下显示专题或栏目 URL，下载成功的各篇文章标题下显示对应文章的 URL，失败条目显示对应文章的 URL 和失败原因
+
+#### Scenario: 补档后查看文章来源
+
+- **WHEN** 用户成功重试或从浏览器另存的 HTML 补齐一篇失败文章
+- **THEN** 更新后的专题仍显示专题 URL 和对应的逐篇 URL，每篇文章的标注显示一次
