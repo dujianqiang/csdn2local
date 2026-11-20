@@ -41,7 +41,7 @@
 #### Scenario: Pause between download batches
 
 - **WHEN** 专题需要处理多批文章
-- **THEN** 系统按设置的并行数量分批处理，每批全部结束后等待 1 秒再开始下一批
+- **THEN** 系统按设置的并行数量分批处理，每批全部结束后等待 2 秒再开始下一批。第一批开始前和最后一批结束后无需等待。
 
 #### Scenario: Reject an invalid concurrency value
 
@@ -60,8 +60,8 @@
 
 #### Scenario: Recover from a transient page disconnect
 
-- **WHEN** 专题目录或文章请求出现 TLS EOF、连接重置或正文未完整接收
-- **THEN** 系统在递增等待后重新请求，次数耗尽时保留具体失败原因和逐篇恢复入口
+- **WHEN** 专题目录或文章请求出现 TLS EOF、连接重置、正文未完整接收或普通 HTTP 521
+- **THEN** 系统每次等待 1 秒后重新请求，最多重试两次。次数耗尽时保留具体失败原因和逐篇恢复入口，明确的安全防护拦截立即报告。
 
 #### Scenario: Import saved HTML for one failed article
 

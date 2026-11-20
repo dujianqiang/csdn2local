@@ -102,7 +102,7 @@ def test_retries_http_521_and_reads_next_response(monkeypatch, tmp_path) -> None
     assert PageFetcher(Settings.from_project_root(tmp_path)).fetch(URL).html == "<p>Article available</p>"
     assert error_body.closed
     assert open_page.call_count == 2
-    pause.assert_called_once_with(0.25)
+    pause.assert_called_once_with(1)
 
 
 def test_reports_persistent_http_521_after_three_attempts(monkeypatch, tmp_path) -> None:
@@ -117,7 +117,7 @@ def test_reports_persistent_http_521_after_three_attempts(monkeypatch, tmp_path)
 
     assert failure.value.__cause__ is errors[-1]
     assert open_page.call_count == 3
-    assert [call.args[0] for call in pause.call_args_list] == [0.25, 0.5]
+    assert [call.args[0] for call in pause.call_args_list] == [1, 1]
 
 
 def test_reports_waf_521_without_retrying(monkeypatch, tmp_path) -> None:
@@ -152,7 +152,7 @@ def test_retries_wrapped_tls_eof_when_opening_a_topic(monkeypatch, tmp_path) -> 
 
     assert snapshot.html == "<h1>Topic</h1>"
     assert [call.args[0].full_url for call in open_page.call_args_list] == [topic_url, topic_url]
-    pause.assert_called_once_with(2)
+    pause.assert_called_once_with(1)
 
 
 @pytest.mark.parametrize("error", [
@@ -185,7 +185,7 @@ def test_reports_tls_eof_after_three_attempts(monkeypatch, tmp_path) -> None:
 
     assert exc_info.value.__cause__ is error
     assert open_page.call_count == 3
-    assert [call.args[0] for call in pause.call_args_list] == [2, 5]
+    assert [call.args[0] for call in pause.call_args_list] == [1, 1]
 
 
 def test_does_not_retry_certificate_errors(monkeypatch, tmp_path) -> None:

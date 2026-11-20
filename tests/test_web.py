@@ -254,6 +254,7 @@ async def test_topic_page_has_navigation_single_format_and_default_concurrency(m
     assert "首次导出 PDF 时会自动下载 Chromium" in page.select_one("#pdf-runtime-help").get_text()
     assert "暂无专题下载记录" in response.text
     assert page.select_one('input[name="article_limit"]')["value"] == "5"
+    assert [item["data-article-limit"] for item in page.select("[data-article-limit]")] == ["5", "10", "0"]
 
 
 @pytest.mark.asyncio
@@ -402,6 +403,9 @@ async def test_topic_form_submits_single_format_and_concurrency(monkeypatch, tmp
             assert progress.status_code == 200
             assert progress.headers["Cache-Control"] == "no-store"
             assert "正在下载文章" in progress.text
+            steps = BeautifulSoup(progress.text, "lxml").select("[data-stage-step]")
+            assert [step["data-stage-step"] for step in steps] == ["discovering", "downloading", "exporting"]
+            assert [step["data-stage-step"] for step in steps if step.get("aria-current") == "step"] == ["downloading"]
             assert ("自动下载 Chromium" in progress.text) == (output_format == "pdf")
             assert "1 / 2" in progress.text
             assert "失败文章" in progress.text
@@ -628,6 +632,8 @@ async def test_topic_retry_fetches_only_the_selected_article(monkeypatch, tmp_pa
         page = BeautifulSoup(initial.text, "lxml")
         retry_form = page.select_one('form[action$="/retry/2"]')
         assert retry_form is not None
+        assert page.select_one("[data-failed-filter]") is not None
+        assert retry_form.find_parent("li")["data-article-status"] == "failed"
         previous_output = page.select_one(".output-links a")
         if previous_output:
             previous_bytes = (await client.get(previous_output["href"])).content
@@ -653,6 +659,99 @@ async def test_topic_retry_fetches_only_the_selected_article(monkeypatch, tmp_pa
             assert "第一篇正文" in saved.select_one("#article-1").get_text()
 
     assert fetched == [url, first, second, second, second]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_archive", [True, False])
+async def test_topic_batch_retry_uses_selected_or_current_failed_articles(monkeypatch, tmp_path: Path, has_archive: bool) -> None:
+    topic = "https://blog.csdn.net/demo/category_123.html"
+    first, second, third = (f"https://blog.csdn.net/demo/article/details/{i}" for i in (11, 22, 33))
+    settings = Settings.from_project_root(tmp_path)
+    service = TopicService(ArchiveService(settings))
+    fetched = []
+    pages = {first: "第一篇原正文"} if has_archive else {}
+
+    def fetch(url, *, referer=None):
+        fetched.append(url)
+        if url == topic:
+            links = "".join(f'<li><a href="{article}">文章</a></li>' for article in (first, second, third))
+            html = f'<div id="column"><ul class="column_article_list">{links}</ul></div>'
+        elif url in pages:
+            html = f'<title>{pages[url]}</title><div id="content_views"><p>{(pages[url] + "。") * 10}</p></div>'
+        else:
+            raise FetchError("暂时无法下载")
+        return PageSnapshot(url, url, html)
+
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "topic_service", service)
+    monkeypatch.setattr(main, "topic_jobs", TopicJobs())
+    monkeypatch.setattr(service.archive_service.fetcher, "fetch", fetch)
+    monkeypatch.setattr(topic_module, "sleep", lambda _: None)
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        submission = await client.post("/topic", data={"topic_url": topic, "article_limit": 0})
+        result = await wait_for_topic_result(client, submission.headers["location"])
+        if has_archive:
+            assert BeautifulSoup(result.text, "lxml").select_one(".output-links a") is not None
+            history = BeautifulSoup((await client.get("/topic")).text, "lxml")
+            result = await client.get(history.select_one("#topic-history a.result-title")["href"])
+        page = BeautifulSoup(result.text, "lxml")
+        batch_form = page.select_one('form[action$="/retry"]')
+        assert batch_form is not None
+        assert [item["value"] for item in page.select(f'input[form="{batch_form["id"]}"][name="positions"]')] == ["1", "2", "3"]
+        action = batch_form["action"]
+        fetched.clear()
+        assert (await client.post(action, data={"mode": "selected"})).status_code == 400
+        assert (await client.post(action, data={"mode": "selected", "positions": "4"})).status_code == 400
+        assert not fetched
+
+        if has_archive:
+            output_url = page.select_one(".output-links a")["href"]
+            original_output = (await client.get(output_url)).content
+            del pages[first]
+            retry = await client.post(action, data={"mode": "selected", "positions": "1"})
+            assert retry.status_code == 303
+            failed = await wait_for_topic_result(client, retry.headers["location"])
+            assert "已保留原正文" in failed.text
+            assert (await client.get(output_url)).content == original_output
+            assert fetched == [first]
+            fetched.clear()
+
+        pages[second] = "第二篇新正文"
+        retry = await client.post(action, data={"mode": "selected", "positions": ["2", "1", "2"]})
+        assert retry.status_code == 303
+        updated = await wait_for_topic_result(client, retry.headers["location"])
+        assert fetched == [first, second]
+        page = BeautifulSoup(updated.text, "lxml")
+        output_url = page.select_one(".output-links a")["href"]
+        output = BeautifulSoup((await client.get(output_url)).text, "lxml")
+        assert "第二篇新正文" in output.select_one("#article-2").get_text()
+        if has_archive:
+            assert "第一篇原正文" in output.select_one("#article-1").get_text()
+            assert "暂时无法下载" in page.select_one('[data-article-status="success"]').get_text()
+
+        fetched.clear()
+        pages.update({first: "第一篇更新正文", third: "第三篇新正文"})
+        retry = await client.post(page.select_one('form[action$="/retry"]')["action"], data={
+            "mode": "failed", "positions": "2",
+        })
+        assert retry.status_code == 303
+        updated = await wait_for_topic_result(client, retry.headers["location"])
+        assert fetched == ([third] if has_archive else [first, third])
+        page = BeautifulSoup(updated.text, "lxml")
+        assert page.select_one('button[value="failed"]').has_attr("disabled")
+        output = BeautifulSoup((await client.get(output_url)).text, "lxml")
+        assert [article["id"] for article in output.select(".topic-article[id]")] == ["article-1", "article-2", "article-3"]
+        assert "第三篇新正文" in output.select_one("#article-3").get_text()
+
+        if has_archive:
+            fetched.clear()
+            retry = await client.post(action, data={"mode": "selected", "positions": "1"})
+            assert retry.status_code == 303
+            await wait_for_topic_result(client, retry.headers["location"])
+            assert fetched == [first]
+            assert "第一篇更新正文" in (await client.get(output_url)).text
 
 
 @pytest.mark.asyncio

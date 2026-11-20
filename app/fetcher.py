@@ -11,8 +11,8 @@ from urllib.parse import urlsplit
 from app.config import Settings
 
 
-_HTTP_521_RETRY_DELAYS = (0.25, 0.5)
-_DISCONNECT_RETRY_DELAYS = (2, 5)
+_MAX_ATTEMPTS = 3
+_RETRY_DELAY_SECONDS = 1
 
 
 class FetchError(RuntimeError):
@@ -55,8 +55,7 @@ class PageFetcher:
         }
         if referer:
             headers["Referer"] = referer
-        max_attempts = len(_DISCONNECT_RETRY_DELAYS) + 1
-        for attempt in range(max_attempts):
+        for attempt in range(_MAX_ATTEMPTS):
             request = Request(requested_url, headers=headers)
             try:
                 with urlopen(request, timeout=self.settings.request_timeout_seconds) as response:
@@ -71,19 +70,18 @@ class PageFetcher:
                     raise FetchError(f"文章请求失败：HTTP {exc.code}") from exc
                 if exc.headers and exc.headers.get("Server", "").strip().casefold() == "waf":
                     raise FetchError("CSDN 安全防护拦截了此次请求（HTTP 521），请在浏览器中打开原网页确认。") from exc
-                if attempt == max_attempts - 1:
-                    raise FetchError(f"文章请求失败：HTTP 521（已尝试 {max_attempts} 次）") from exc
-                sleep(_HTTP_521_RETRY_DELAYS[attempt])
+                if attempt == _MAX_ATTEMPTS - 1:
+                    raise FetchError(f"文章请求失败：HTTP 521（已尝试 {_MAX_ATTEMPTS} 次）") from exc
             except (OSError, IncompleteRead) as exc:
                 reason = exc.reason if isinstance(exc, URLError) else exc
                 disconnect = self._disconnect_message(reason)
                 if disconnect is None:
                     raise FetchError(f"文章请求失败：{exc}") from exc
-                if attempt == max_attempts - 1:
+                if attempt == _MAX_ATTEMPTS - 1:
                     raise FetchError(
-                        f"页面请求失败：{disconnect}，已尝试 {max_attempts} 次。请稍后重试。"
+                        f"页面请求失败：{disconnect}，已尝试 {_MAX_ATTEMPTS} 次。请稍后重试。"
                     ) from exc
-                sleep(_DISCONNECT_RETRY_DELAYS[attempt])
+            sleep(_RETRY_DELAY_SECONDS)
 
         if status_code >= 400:
             raise FetchError(f"文章请求失败：HTTP {status_code}")

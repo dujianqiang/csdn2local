@@ -3,9 +3,10 @@
 {% block content %}
   <section class="page-heading" aria-labelledby="page-title">
     <div><h1 id="page-title">保存专题</h1><p>按原顺序归档 CSDN 专题，合成一个带目录的文件。</p></div>
-    <a href="#topic-history">查看下载记录</a>
+    <a class="button button--quiet" href="#topic-history">查看下载记录</a>
   </section>
 
+  <div class="workspace">
   <section class="primary-task" aria-label="专题下载表单">
     {% if active_job_url %}
     <p class="notice"><a href="{{ active_job_url }}">查看正在下载的专题</a></p>
@@ -18,14 +19,21 @@
       </div>
       <div class="field topic-limit">
         <label for="article-limit">下载篇数</label>
-        <input id="article-limit" name="article_limit" type="number" min="0" step="1" value="{{ article_limit }}" required aria-describedby="topic-limit-help">
-        <p id="topic-limit-help" class="hint">填 0 下载全部，其他数字表示只下载前几篇。</p>
+        <div class="limit-controls">
+          <input id="article-limit" name="article_limit" type="number" min="0" step="1" value="{{ article_limit }}" required aria-describedby="topic-limit-help">
+          <div class="limit-presets" role="group" aria-label="篇数快捷选项" hidden>
+            <button type="button" class="button--quiet" data-article-limit="5" aria-pressed="false">前 5 篇</button>
+            <button type="button" class="button--quiet" data-article-limit="10" aria-pressed="false">前 10 篇</button>
+            <button type="button" class="button--quiet" data-article-limit="0" aria-pressed="false">全部</button>
+          </div>
+        </div>
+        <p id="topic-limit-help" class="hint">填 0 下载全部已识别文章。</p>
       </div>
-      <fieldset class="choice-group" aria-describedby="pdf-runtime-help">
-        <legend>输出格式 <span class="hint">单选</span></legend>
+      <fieldset class="choice-group" data-format-options>
+        <legend>输出格式</legend>
         <div class="choice-grid">
           {% for format in output_formats|default(("html", "epub", "pdf")) %}
-          <label class="choice" for="topic-format-{{ format }}"><input id="topic-format-{{ format }}" type="radio" name="output_format" value="{{ format }}" required {% if output_format == format %}checked{% endif %}> {{ "Markdown" if format == "md" else format|upper }}</label>
+          <label class="choice" for="topic-format-{{ format }}"><input id="topic-format-{{ format }}" type="radio" name="output_format" value="{{ format }}" required {% if format == "pdf" %}aria-describedby="pdf-runtime-help"{% endif %} {% if output_format == format %}checked{% endif %}> <span>{{ "Markdown" if format == "md" else format|upper }}</span></label>
           {% endfor %}
         </div>
         <p class="hint" id="pdf-runtime-help">首次导出 PDF 时会自动下载 Chromium，可能需要几分钟。</p>
@@ -68,7 +76,8 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="empty-state">{% if history_format %}没有找到匹配的专题下载记录。{% else %}暂无专题下载记录。{% endif %}</p>
+    <p class="empty-state">{% if history_format %}没有找到匹配的专题下载记录。 <a href="/topic#topic-history">清除筛选</a>{% else %}暂无专题下载记录。{% endif %}</p>
     {% endif %}
   </section>
+  </div>
 {% endblock %}

@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from tempfile import SpooledTemporaryFile
 from time import monotonic
+from typing import Literal
 from urllib.parse import quote, urlencode
 
 import uvicorn
@@ -250,22 +251,28 @@ def topic_progress(request: Request, job_id: str) -> HTMLResponse:
         record = read_topic_archive(job.failed_attempt.target.archive_dir)
         if record:
             result = record.attempt.as_result()
+    attempt = record.attempt if record else job.failed_attempt
+    progress = job.progress
+    if attempt and (job.batch_retry or job.retry_position is not None):
+        progress = TopicProgress(total=len(attempt.articles), discovered_total=attempt.discovered_total)
     return templates.TemplateResponse(
         request=request,
         name="topic_result.html",
         context={
             "success": result is not None,
-            "partial": result is not None and result.status == "partial",
+            "partial": result is not None and (result.status == "partial" or bool(result.retry_errors)),
             "result": result,
             "articles": result.articles if result else job.failed_articles,
             "error": job.error,
+            "batch_retry": job.batch_retry,
+            "retry_errors": result.retry_errors if result else {},
             "output_url": _download_url(result.output_path) if result else None,
             "topic_url": job.topic_url,
             "output_format": job.output_format,
             "concurrency": job.concurrency,
             "article_limit": job.article_limit,
-            "progress": job.progress,
-            "retry_base": f"/topic/jobs/{job_id}/retry" if job.failed_attempt or (record and record.can_retry) else None,
+            "progress": progress,
+            "retry_base": f"/topic/jobs/{job_id}/retry" if (record.can_retry if record else job.failed_attempt) else None,
             "edit_url": _topic_edit_url(job.topic_url, job.output_format, job.concurrency, job.article_limit),
         },
         headers=headers,
@@ -320,19 +327,48 @@ def retry_archived_topic_article(
 def retry_topic_article(
     request: Request, job_id: str, position: int, article_html: UploadFile | None = File(default=None)
 ) -> RedirectResponse:
+    record, failed_attempt = _job_retry_source(job_id)
+    return _submit_article_retry(request, position, article_html, record=record, failed_attempt=failed_attempt)
+
+
+@app.post("/topic/history/{archive_ref:path}/retry")
+def retry_archived_topic_batch(
+    request: Request, archive_ref: str, mode: Literal["selected", "failed"] = Form(),
+    positions: list[int] = Form(default=[]),
+) -> RedirectResponse:
+    return _submit_topic_batch_retry(request, mode, positions, record=_history_record(archive_ref))
+
+
+@app.post("/topic/jobs/{job_id}/retry")
+def retry_topic_batch(
+    request: Request, job_id: str, mode: Literal["selected", "failed"] = Form(),
+    positions: list[int] = Form(default=[]),
+) -> RedirectResponse:
+    record, failed_attempt = _job_retry_source(job_id)
+    return _submit_topic_batch_retry(request, mode, positions, record=record, failed_attempt=failed_attempt)
+
+
+def _job_retry_source(job_id: str) -> tuple[TopicArchive | None, TopicAttempt | None]:
     job = topic_jobs.get(job_id)
     if job and job.failed_attempt:
         if any(not article.error for article in job.failed_attempt.articles):
             record = read_topic_archive(job.failed_attempt.target.archive_dir)
             if record:
-                return _submit_article_retry(request, position, article_html, record=record)
+                return record, None
             raise HTTPException(status_code=404, detail="找不到可重试的原归档。")
-        return _submit_article_retry(request, position, article_html, failed_attempt=job.failed_attempt)
+        return None, job.failed_attempt
     if job and job.result:
         record = read_topic_archive(job.result.metadata_path.parent)
         if record:
-            return _submit_article_retry(request, position, article_html, record=record)
+            return record, None
     raise HTTPException(status_code=404, detail="找不到可重试的专题任务。")
+
+
+def _refresh_retry_attempt(archive_dir: Path) -> TopicAttempt:
+    latest = read_topic_archive(archive_dir)
+    if latest is None or not latest.can_retry:
+        raise ValueError("找不到可重试的原归档。")
+    return latest.attempt
 
 
 def _submit_article_retry(
@@ -356,18 +392,37 @@ def _submit_article_retry(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    def refresh() -> TopicAttempt:
-        latest = read_topic_archive(attempt.target.archive_dir)
-        if latest is None or not latest.can_retry:
-            raise ValueError("找不到可重试的原归档。")
-        return latest.attempt
-
     try:
         job_id = topic_jobs.submit_retry(
-            topic_service, attempt, position, refresh=refresh if record else None, saved_html=saved_html
+            topic_service, attempt, position,
+            refresh=partial(_refresh_retry_attempt, attempt.target.archive_dir) if record else None,
+            saved_html=saved_html,
         )
     except TopicJobBusy as exc:
         job_id = exc.job_id
+    return RedirectResponse(request.url_for("topic_progress", job_id=job_id), status_code=303)
+
+
+def _submit_topic_batch_retry(
+    request: Request, mode: Literal["selected", "failed"], positions: list[int], *,
+    record: TopicArchive | None, failed_attempt: TopicAttempt | None = None,
+) -> RedirectResponse:
+    attempt = record.attempt if record else failed_attempt
+    if not attempt or (record and not record.can_retry):
+        raise HTTPException(status_code=409, detail="这个归档无法批量重试，请重新下载专题。")
+    selected = None if mode == "failed" else set(positions)
+    if selected is None:
+        if not any(article.error for article in attempt.articles):
+            raise HTTPException(status_code=400, detail="当前没有失败文章可重试。")
+    elif not selected or selected - {article.position for article in attempt.articles}:
+        raise HTTPException(status_code=400, detail="请选择当前专题中的文章进行重试。")
+    try:
+        job_id = topic_jobs.submit_batch_retry(
+            topic_service, attempt, selected,
+            refresh=partial(_refresh_retry_attempt, attempt.target.archive_dir) if record else None,
+        )
+    except TopicJobBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RedirectResponse(request.url_for("topic_progress", job_id=job_id), status_code=303)
 
 

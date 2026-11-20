@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from dataclasses import dataclass, field, replace
@@ -75,6 +75,7 @@ class TopicResult:
     metadata_path: Path
     articles: list[TopicArticle]
     warnings: list[str] = field(default_factory=list)
+    retry_errors: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -160,29 +161,13 @@ class TopicService:
         articles: list[TopicArticle] = []
         failed_count = 0
         try:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                for batch_number, batch in enumerate(batched(enumerate(article_urls, 1), worker_count)):
-                    if batch_number:
-                        sleep(1)
-                    futures = [
-                        executor.submit(
-                            self._download_article,
-                            index,
-                            url,
-                            work_root,
-                            local_articles.get(_article_id(url)),
-                            referer=snapshot.final_url,
-                        )
-                        for index, url in batch
-                    ]
-                    for future in as_completed(futures):
-                        article = future.result()
-                        articles.append(article)
-                        failed_count += int(bool(article.error))
-                        if on_progress:
-                            on_progress(
-                                TopicProgress("downloading", total, len(articles), failed_count, discovered_total)
-                            )
+            downloads = ((position, url, local_articles.get(_article_id(url)))
+                         for position, url in enumerate(article_urls, 1))
+            for article in self._download_articles(downloads, work_root, worker_count, referer=snapshot.final_url):
+                articles.append(article)
+                failed_count += int(bool(article.error))
+                if on_progress:
+                    on_progress(TopicProgress("downloading", total, len(articles), failed_count, discovered_total))
             articles.sort(key=lambda article: article.position)
             topic_dir = topic_directory(store.settings.data_dir, topic_title, topic_url)
             target = ArchivePaths(topic_dir / topic_scope(article_limit) / selected_format)
@@ -209,47 +194,90 @@ class TopicService:
         previous = next((article for article in attempt.articles if article.position == position and article.error), None)
         if previous is None:
             raise ValueError("这篇文章当前无需重试。")
-        total = len(attempt.articles)
-        failed = sum(bool(article.error) for article in attempt.articles)
-        has_saved_articles = failed < total
+        return self.retry_articles(
+            attempt, {position}, on_progress=on_progress,
+            saved_articles={position: saved_html} if saved_html is not None else None,
+        )
+
+    def retry_articles(
+        self, attempt: TopicAttempt, positions: set[int] | None, *,
+        on_progress: Callable[[TopicProgress], None], saved_articles: dict[int, str] | None = None,
+    ) -> TopicResult:
+        if positions is None:
+            positions = {article.position for article in attempt.articles if article.error}
+            if not positions:
+                raise ValueError("当前没有失败文章可重试。")
+        if not positions or positions - {article.position for article in attempt.articles}:
+            raise ValueError("请选择当前专题中的文章进行重试。")
+        total = len(positions)
+        has_saved_articles = any(not article.error for article in attempt.articles)
         if has_saved_articles and not attempt.output_path.is_file():
             raise ValueError("原专题输出已不存在，请重新下载专题。")
         if not has_saved_articles and attempt.target.archive_dir.exists():
             target = attempt.target.archive_dir
             retry_key = sanitize_filename(f"{target.name}-重试-{uuid4().hex[:8]}", max_length=150)
             attempt = replace(attempt, target=ArchivePaths(target.with_name(retry_key)))
-        on_progress(TopicProgress("downloading", total, total - 1, failed - 1, attempt.discovered_total))
+        on_progress(TopicProgress("downloading", total))
         store = self.archive_service.store
         staging = store.create_staging()
         work_root = staging.archive_dir / "article-work"
         try:
-            retried = self._download_article(position, previous.url, work_root, saved_html, referer=attempt.topic_url)
-            articles = [retried if article is previous else replace(article) for article in attempt.articles]
+            local_articles = saved_articles or {}
+            downloads = ((article.position, article.url, local_articles.get(article.position))
+                         for article in attempt.articles if article.position in positions)
+            retried: dict[int, TopicArticle] = {}
+            errors: dict[int, str] = {}
+            for article in self._download_articles(downloads, work_root, attempt.concurrency, referer=attempt.topic_url):
+                retried[article.position] = article
+                if article.error:
+                    errors[article.position] = article.error
+                on_progress(TopicProgress("downloading", total, len(retried), len(errors)))
+            replacements = retried.keys() - errors.keys()
+            articles = [
+                retried[article.position]
+                if article.position in replacements or (article.error and article.position in retried)
+                else replace(article)
+                for article in attempt.articles
+            ]
             updated = replace(attempt, articles=articles)
-            if retried.error:
-                on_progress(TopicProgress("downloading", total, total, failed, attempt.discovered_total))
+            if not replacements:
                 if has_saved_articles:
-                    return updated.as_result()
-                raise TopicFailure(retried.error, articles, attempt=updated)
-            on_progress(TopicProgress("exporting", total, total, failed - 1, attempt.discovered_total))
-            if has_saved_articles:
+                    return replace(updated.as_result(), retry_errors=errors)
+                reasons = "；".join(dict.fromkeys(errors.values()))
+                raise TopicFailure(reasons, articles, attempt=updated)
+            on_progress(TopicProgress("exporting", total, total, len(errors)))
+            retained = [article for article in articles if not article.error and article.position not in replacements]
+            if retained:
                 bodies = self.archived_bodies(attempt)
-                for article in articles:
-                    if article is not retried and not article.error:
-                        if str(article.position) not in bodies:
-                            raise ValueError("已有归档缺少正文，无法合并。请重新下载专题。")
-                        article.body_html = bodies[str(article.position)]
+                for article in retained:
+                    if str(article.position) not in bodies:
+                        raise ValueError("已有归档缺少正文，无法合并。请重新下载专题。")
+                    article.body_html = bodies[str(article.position)]
                 staging.assets.mkdir(parents=True, exist_ok=True)
                 for asset in attempt.target.assets.glob("*"):
                     if asset.resolve() == asset and asset.is_file():
                         shutil.copy2(asset, staging.assets / asset.name)
-            self._collect_assets([retried], staging.assets)
+            self._collect_assets([article for article in articles if article.position in replacements], staging.assets)
             shutil.rmtree(work_root, ignore_errors=True)
-            return self._export(updated, staging)
+            return replace(self._export(updated, staging), retry_errors=errors)
         except (OSError, ValueError, OutputError) as exc:
             raise TopicFailure(f"重试后无法更新专题：{exc}", attempt.articles, attempt=attempt) from exc
         finally:
             store.cleanup_staging(staging)
+
+    def _download_articles(
+        self, downloads: Iterable[tuple[int, str, str | None]], work_root: Path, worker_count: int, *, referer: str,
+    ) -> Iterator[TopicArticle]:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            for batch_number, batch in enumerate(batched(downloads, worker_count)):
+                if batch_number:
+                    sleep(2)
+                futures = [
+                    executor.submit(self._download_article, position, url, work_root, saved_html, referer=referer)
+                    for position, url, saved_html in batch
+                ]
+                for future in as_completed(futures):
+                    yield future.result()
 
     def _export(self, attempt: TopicAttempt, staging: ArchivePaths) -> TopicResult:
         article_dicts = [self._article_output(article) for article in attempt.articles]

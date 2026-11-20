@@ -351,7 +351,10 @@ def test_topic_retry_publishes_epub_while_staged_file_is_open(monkeypatch, tmp_p
     assert list(store.staging_root.iterdir()) == []
 
 
-def test_topic_waits_one_second_between_completed_batches(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("concurrency, completed_batches", [(1, [1, 2, 3, 4]), (2, [2, 4])])
+def test_topic_waits_two_seconds_between_completed_batches(
+    monkeypatch, tmp_path: Path, concurrency: int, completed_batches: list[int]
+) -> None:
     service = make_service(tmp_path)
     urls = [f"https://blog.csdn.net/demo/article/details/{number}" for number in range(1, 6)]
     monkeypatch.setattr(service, "discover", lambda *_: ("测试专题", urls))
@@ -369,9 +372,9 @@ def test_topic_waits_one_second_between_completed_batches(monkeypatch, tmp_path:
 
     monkeypatch.setattr(service, "_download_article", download)
     monkeypatch.setattr(topic_module, "sleep", pause)
-    result = service.download(TOPIC_URL, concurrency=2, on_progress=updates.append)
+    result = service.download(TOPIC_URL, concurrency=concurrency, on_progress=updates.append)
 
-    assert pauses == [(1, 2, {1, 2}), (1, 4, {1, 2, 3, 4})]
+    assert pauses == [(2, processed, set(range(1, processed + 1))) for processed in completed_batches]
     assert [article.url for article in result.articles] == urls
 
 

@@ -3,14 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f6fa">
+  <meta name="theme-color" content="#142239">
   <title>{% block title %}csdn2local{% endblock %}</title>
   {% block extra_head %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v=7">
-  <script defer src="{{ url_for('static', path='workflows.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v=8">
+  <script defer src="{{ url_for('static', path='workflows.js') }}?v=2"></script>
 </head>
 <body class="site-shell {% block body_class %}{% endblock %}">
   {% set topic_active = request.url.path.startswith('/topic') %}
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <div class="header-bar">
   <header class="site-header">
     <a class="brand" href="/" aria-label="csdn2local 首页">
       <strong>csdn2local</strong>
@@ -20,8 +22,9 @@
       <a class="nav-link" href="/topic"{% if topic_active %} aria-current="page"{% endif %}>专题下载</a>
     </nav>
   </header>
+  </div>
 
-  <main class="site-main">
+  <main class="site-main" id="main-content" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
 

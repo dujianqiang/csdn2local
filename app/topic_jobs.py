@@ -27,6 +27,7 @@ class TopicJob:
     concurrency: int
     article_limit: int
     retry_position: int | None = None
+    batch_retry: bool = False
     started_at: float = field(default_factory=monotonic)
     progress: TopicProgress = field(default_factory=TopicProgress)
     result: TopicResult | None = None
@@ -62,6 +63,16 @@ class TopicJobs:
         )
         return self._submit(job, lambda progress: service.retry_article(
             refresh() if refresh else attempt, position, on_progress=progress, saved_html=saved_html
+        ))
+
+    def submit_batch_retry(
+        self, service: TopicService, attempt: TopicAttempt, positions: set[int] | None,
+        *, refresh: Callable[[], TopicAttempt] | None = None,
+    ) -> str:
+        job = TopicJob(attempt.topic_url, attempt.output_format, attempt.concurrency, attempt.article_limit,
+                       batch_retry=True, progress=TopicProgress("downloading"))
+        return self._submit(job, lambda progress: service.retry_articles(
+            refresh() if refresh else attempt, positions, on_progress=progress,
         ))
 
     def _submit(

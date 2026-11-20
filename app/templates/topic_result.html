@@ -1,12 +1,23 @@
 {% extends "base.html" %}
 {% block title %}{% if archived %}专题详情{% elif success %}专题下载完成{% else %}专题下载失败{% endif %} · csdn2local{% endblock %}
 {% block content %}
-  <section class="state-card" aria-labelledby="result-title">
+  <section class="state-card" data-result-state="{{ 'partial' if partial else 'success' if success else 'failed' }}" aria-labelledby="result-title">
     {% if archived %}<p class="hint"><a href="/topic#topic-history">专题下载记录</a> / 专题详情</p>{% endif %}
-    <h1 id="result-title">{% if archived %}{{ result.topic_title }}{% elif success %}{% if partial %}专题部分完成{% else %}专题下载完成{% endif %}{% else %}专题下载失败{% endif %}</h1>
+    <h1 id="result-title">{% if archived %}{{ result.topic_title }}{% elif batch_retry %}{{ "批量重试失败" if error else "批量重试完成" }}{% elif success %}{% if partial %}专题部分完成{% else %}专题下载完成{% endif %}{% else %}专题下载失败{% endif %}</h1>
     {% if success and not archived %}
     <p class="result-name">{{ result.topic_title }}</p>
     {% endif %}
+    {% if success %}
+    <div class="output-links button-row"><a class="button" href="{{ output_url }}">{% if result.output_format == "md" %}下载专题 Markdown ZIP{% else %}打开专题 {{ result.output_format|upper }}{% endif %}</a>{% if not archived %}<a href="/topic#topic-history">查看下载记录</a>{% endif %}</div>
+    {% if result.output_format == "md" %}<p class="hint">解压 ZIP 后打开 topic.md，图片从同级 assets 文件夹读取。</p>{% endif %}
+    {% endif %}
+    {% if error %}
+    <p class="notice notice--error" role="alert">{{ error }}</p>
+    {% endif %}
+    {% if batch_retry and retry_errors %}
+    <p class="notice" role="status">本次重试有 {{ retry_errors|length }} 篇失败，已有的正文仍可阅读。</p>
+    {% endif %}
+    {% if progress and progress.discovered_total > progress.total %}<p class="notice">专题共 {{ progress.discovered_total }} 篇，本次只处理前 {{ progress.total }} 篇。</p>{% endif %}
     {% if versions %}
     <section class="result-section" aria-labelledby="versions-title">
       <h2 id="versions-title">归档版本</h2>
@@ -19,21 +30,28 @@
       </ul>
     </section>
     {% endif %}
-    {% if progress and progress.discovered_total > progress.total %}<p class="notice">专题共 {{ progress.discovered_total }} 篇，本次只处理前 {{ progress.total }} 篇。</p>{% endif %}
-    {% if success %}
-    <div class="output-links button-row"><a class="button" href="{{ output_url }}">{% if result.output_format == "md" %}下载专题 Markdown ZIP{% else %}打开专题 {{ result.output_format|upper }}{% endif %}</a>{% if not archived %}<a href="/topic#topic-history">查看下载记录</a>{% endif %}</div>
-    {% if result.output_format == "md" %}<p class="hint">解压 ZIP 后打开 topic.md，图片从同级 assets 文件夹读取。</p>{% endif %}
-    {% endif %}
-    {% if error %}
-    <p class="notice notice--error" role="alert">{{ error }}</p>
-    {% endif %}
     {% if articles %}
+    {% set failed_count = articles|selectattr("error")|list|length %}
     <section class="result-section" aria-labelledby="article-results-title">
-      <h2 id="article-results-title">文章处理结果</h2>
-      <ol class="article-results">
+      <div class="article-results-heading">
+        <div>
+          <h2 id="article-results-title">文章处理结果</h2>
+          <p class="hint">{{ articles|length - failed_count }} 篇已完成 · {{ failed_count }} 篇失败</p>
+        </div>
+        {% if failed_count %}
+        <label class="failed-filter" hidden><input type="checkbox" data-failed-filter aria-controls="topic-article-results"> 仅显示失败文章</label>
+        {% endif %}
+      </div>
+      <ol class="article-results" id="topic-article-results" role="list">
         {% for article in articles %}
-        <li class="article-result">
-          {% set article_title = article.title or "文章 " ~ article.position %}
+        {% set article_title = article.title or "文章 " ~ article.position %}
+        <li class="article-result" data-article-status="{{ 'failed' if article.error else 'success' }}">
+          {% if retry_base %}<label class="article-selection">
+            <input type="checkbox" form="topic-batch-retry" name="positions" value="{{ article.position }}" aria-label="选择第 {{ article.position }} 篇：{{ article_title }}">
+            <span class="article-position" aria-hidden="true">{{ article.position }}</span>
+          </label>{% else %}
+          <span class="article-position" aria-label="第 {{ article.position }} 篇">{{ article.position }}</span>
+          {% endif %}
           {% if output_url and result.output_format == "html" and not article.error %}
           <a class="article-result-title" href="{{ output_url }}#article-{{ article.position }}">{{ article_title }}</a>
           {% elif output_url and result.output_format == "pdf" and not article.error %}
@@ -67,7 +85,12 @@
             {% endif %}
           </div>
           {% else %}
-          <span class="article-result-status">{{ "已从本地 HTML 导入" if article.source == "saved_html" else "已完成" }}</span>
+          <div class="article-result-status">
+            <span>{{ "已从本地 HTML 导入" if article.source == "saved_html" else "已完成" }}</span>
+            {% if retry_errors and article.position in retry_errors %}
+            <p class="retry-error">重试失败，已保留原正文。{{ retry_errors[article.position] }}</p>
+            {% endif %}
+          </div>
           {% endif %}
         </li>
         {% endfor %}
@@ -83,6 +106,9 @@
     </details>
     {% endif %}
     {% if edit_url %}
+    {% if retry_base and articles %}
+    <form id="topic-batch-retry" action="{{ retry_base }}" method="post" data-pending="正在提交…"></form>
+    {% endif %}
     <form class="result-section" action="/topic" method="post" enctype="multipart/form-data" data-pending="正在创建任务…">
       <input type="hidden" name="topic_url" value="{{ topic_url }}">
       <input type="hidden" name="output_format" value="{{ output_format }}">
@@ -91,6 +117,10 @@
       {% if not success or partial %}{% include "topic_html_input.html" %}{% endif %}
       <div class="button-row">
         <button class="button--quiet" type="submit">重新下载专题</button>
+        {% if retry_base and articles %}
+        <button class="button--quiet" type="submit" form="topic-batch-retry" name="mode" value="selected" data-retry-selected>批量重试</button>
+        <button class="button--quiet" type="submit" form="topic-batch-retry" name="mode" value="failed" {% if not failed_count %}disabled{% endif %}>重试全部失败</button>
+        {% endif %}
         <a href="{{ edit_url }}">修改设置</a>
         <span class="submit-feedback" role="status"></span>
       </div>

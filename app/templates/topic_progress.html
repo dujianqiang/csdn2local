@@ -4,11 +4,16 @@
 {% block content %}
   {% set format_label = "Markdown" if job.output_format == "md" else job.output_format|upper %}
   <section class="state-card" aria-labelledby="progress-title" data-progress-url="{{ status_url }}" data-job-url="{{ job_url }}" data-format="{{ format_label }}">
-    <h1 id="progress-title">{% if job.retry_position %}正在重试第 {{ job.retry_position }} 篇{% else %}专题下载进度{% endif %}</h1>
+    <h1 id="progress-title">{% if job.batch_retry %}正在批量重试{% elif job.retry_position %}正在重试第 {{ job.retry_position }} 篇{% else %}专题下载进度{% endif %}</h1>
     <p class="hint source-url">{{ job.topic_url }}</p>
     <div class="progress-block">
+      <ol class="task-steps" aria-label="专题任务阶段">
+        {% for step, label in [("discovering", "读取目录"), ("downloading", "下载文章"), ("exporting", "生成文件")] %}
+        <li data-stage-step="{{ step }}" {% if job.progress.stage == step %}aria-current="step"{% endif %}><span>{{ loop.index }}</span>{{ label }}</li>
+        {% endfor %}
+      </ol>
       <h2 id="stage-title" role="status">{% if job.progress.stage == "discovering" %}正在读取专题目录{% elif job.progress.stage == "downloading" %}正在下载文章{% else %}正在生成 {{ format_label }}{% endif %}</h2>
-      <progress aria-label="文章处理进度" id="topic-meter" {% if job.progress.total %}value="{{ job.progress.processed }}" max="{{ job.progress.total }}"{% else %}hidden{% endif %}></progress>
+      <progress aria-label="任务进度" id="topic-meter" {% if job.progress.stage == "downloading" and job.progress.total %}value="{{ job.progress.processed }}" max="{{ job.progress.total }}"{% endif %}></progress>
       <div class="progress-stats">
         <p id="topic-counts" {% if not job.progress.total %}hidden{% endif %}><strong id="topic-count">{{ job.progress.processed }} / {{ job.progress.total }}</strong> 已处理 · <strong id="topic-failed">{{ job.progress.failed }}</strong> 失败文章</p>
         <p>已用时 <strong id="topic-elapsed">{{ elapsed }} 秒</strong></p>
@@ -19,7 +24,7 @@
     {% if job.output_format == "pdf" %}
     <p class="hint">首次导出 PDF 时，任务会在生成文件前自动下载 Chromium，可能需要几分钟。</p>
     {% endif %}
-    <p class="hint">关闭或离开页面后，任务仍会在后台运行。</p>
+    <p class="hint">进度自动更新，离开页面后任务继续运行。</p>
     <div class="button-row">
       <a class="button button--quiet" href="{{ job_url }}">刷新进度</a>
       <a href="/topic#topic-history">查看下载记录</a>

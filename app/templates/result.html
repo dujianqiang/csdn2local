@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{% if success %}保存完成{% else %}保存失败{% endif %} · csdn2local{% endblock %}
 {% block content %}
-  <section class="state-card" aria-labelledby="result-title">
+  <section class="state-card" data-result-state="{{ 'partial' if partial else 'success' if success else 'failed' }}" aria-labelledby="result-title">
     <h1 id="result-title">{% if success %}{% if partial %}文章已保存，部分内容有缺失{% else %}文章保存完成{% endif %}{% else %}文章保存失败{% endif %}</h1>
     {% if success %}
     <p class="result-name">{{ result.metadata.title }}</p>
