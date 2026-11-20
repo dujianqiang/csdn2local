@@ -3,6 +3,7 @@
 {% block extra_head %}<noscript><meta http-equiv="refresh" content="2"></noscript>{% endblock %}
 {% block content %}
   {% set format_label = "Markdown" if job.output_format == "md" else job.output_format|upper %}
+  <div{% if not job.retry_position %} class="workspace topic-progress-layout"{% endif %}>
   <section class="state-card" aria-labelledby="progress-title" data-progress-url="{{ status_url }}" data-job-url="{{ job_url }}" data-format="{{ format_label }}">
     <h1 id="progress-title">{% if job.batch_retry %}正在批量重试{% elif job.retry_position %}正在重试第 {{ job.retry_position }} 篇{% else %}专题下载进度{% endif %}</h1>
     <p class="hint source-url">{{ job.topic_url }}</p>
@@ -30,4 +31,10 @@
       <a href="/topic#topic-history">查看下载记录</a>
     </div>
   </section>
+  {% if not job.retry_position %}
+  <aside class="notice topic-progress-tip" aria-label="批量下载提示">
+    <p>批量下载可能触发 CSDN 官方风控。若有文章下载失败，可在结果页点击<strong>「重试全部失败」</strong>批量重试。</p>
+  </aside>
+  {% endif %}
+  </div>
 {% endblock %}
